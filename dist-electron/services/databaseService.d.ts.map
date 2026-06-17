@@ -1,1 +1,0 @@
-{"version":3,"file":"databaseService.d.ts","sourceRoot":"","sources":["../../electron/services/databaseService.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,gBAAgB,CAAA;AAO9C,wBAAgB,kBAAkB,IAAI,IAAI,CAKzC;AAED,wBAAgB,YAAY,IAAI,QAAQ,GAAG,IAAI,CAI9C;AAED,wBAAgB,aAAa,IAAI,IAAI,CAIpC;AAED,wBAAgB,eAAe,IAAI,OAAO,CAEzC;AAGD,wBAAgB,WAAW,QAE1B"}

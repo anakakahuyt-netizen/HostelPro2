@@ -1,1 +1,0 @@
-{"version":3,"file":"lifecycleService.d.ts","sourceRoot":"","sources":["../../../electron/services/lifecycleService.ts"],"names":[],"mappings":"AAAA,OAAO,EAAO,aAAa,EAAE,MAAM,UAAU,CAAA;AAM7C,wBAAgB,gBAAgB,IAAI,OAAO,CAE1C;AAED,wBAAgB,oBAAoB,SASnC;AAED,wBAAgB,aAAa,CAAC,MAAM,EAAE,aAAa,QAElD;AAED,wBAAgB,eAAe,SAI9B;AAED,wBAAgB,qBAAqB,SAIpC"}
