@@ -18,22 +18,26 @@ export default function PaymentsPage() {
     Paid: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
     Pending: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
     Overdue: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+    Partial: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+    Due: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
   }
-
+ 
   const payments = usePaymentStore((s) => s.payments)
   const addPayment = usePaymentStore((s) => s.addPayment)
   const updatePayment = usePaymentStore((s) => s.updatePayment)
   const removePayment = usePaymentStore((s) => s.removePayment)
   const boarders = useBoarderStore((s) => s.boarders)
 
+  const [searchQuery, setSearchQuery] = useState('')
   const [filterBoarder, setFilterBoarder] = useState('')
   const [filterMonth, setFilterMonth] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
   const [editingPayment, setEditingPayment] = useState<string | null>(null)
+  const [viewingPayment, setViewingPayment] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
 
   const totalCollected = useMemo(() => payments.reduce((sum, p) => sum + p.amount, 0), [payments])
-
   const pendingAmount = useMemo(() => payments.filter((p) => p.status === 'Pending').reduce((s, p) => s + p.amount, 0), [payments])
   const overdueAmount = useMemo(() => payments.filter((p) => p.status === 'Overdue').reduce((s, p) => s + p.amount, 0), [payments])
   const successRate = useMemo(() => (payments.length ? Math.round((payments.filter((p) => p.status === 'Paid').length / payments.length) * 100) : 0), [payments])
@@ -45,12 +49,29 @@ export default function PaymentsPage() {
     { label: 'Success Rate', value: `${successRate}%`, change: '+1.8%', icon: 'CheckCircle2', accent: 'from-blue-500 to-cyan-500' },
   ]
 
+  const dueMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    boarders.forEach((boarder) => {
+      const paid = payments.filter((p) => p.boarderId === boarder.id && p.status === 'Paid').reduce((s, p) => s + p.amount, 0)
+      map[boarder.id] = Math.max(0, boarder.monthlyRent - paid)
+    })
+    return map
+  }, [boarders, payments])
+
+  const normalizeStatus = (status: string) => {
+    if (status === 'Paid') return 'Paid'
+    if (status === 'Partial') return 'Partial'
+    return 'Due'
+  }
+
   const filtered = payments.filter((payment) => {
+    if (searchQuery && !payment.guest.toLowerCase().includes(searchQuery.toLowerCase())) return false
     if (filterBoarder && payment.boarderId !== filterBoarder) return false
     if (filterMonth) {
       const month = payment.date.slice(0, 7)
       if (month !== filterMonth) return false
     }
+    if (filterStatus && normalizeStatus(payment.status) !== filterStatus) return false
     return true
   })
 
@@ -114,7 +135,9 @@ export default function PaymentsPage() {
             <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by guest name, room, or payment ID..."
+              placeholder="Search by boarder name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full rounded-2xl border border-slate-700 bg-slate-950 py-3 pl-12 pr-4 text-slate-100 placeholder-slate-500 transition focus:border-sky-500 focus:outline-none"
             />
           </div>
@@ -125,6 +148,12 @@ export default function PaymentsPage() {
             ))}
           </select>
           <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4 text-slate-100" />
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4 text-slate-100">
+            <option value="">All statuses</option>
+            <option value="Paid">Paid</option>
+            <option value="Partial">Partial</option>
+            <option value="Due">Due</option>
+          </select>
           <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
             <Filter className="h-5 w-5" />
             Filters
@@ -181,7 +210,7 @@ export default function PaymentsPage() {
                   <td className="px-4 py-4 text-sm text-slate-400">{payment.method}</td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
-                      <button className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
+                      <button onClick={() => setViewingPayment(payment.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
                         <Eye className="h-4 w-4" />
                       </button>
                       <button onClick={() => { setEditingPayment(payment.id); setShowModal(true) }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
@@ -219,7 +248,26 @@ export default function PaymentsPage() {
           <PaymentForm boarders={boarders} initial={currentPayment ?? undefined} onSubmit={handleSavePayment} />
         </div>
       </Modal>
-      <ConfirmModal open={!!confirmDelete} title="Delete payment" message={confirmDelete || ''} onConfirm={() => { if (confirmDelete) { removePayment(confirmDelete); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
+      <Modal open={!!viewingPayment} onClose={() => setViewingPayment(null)}>
+        <h3 className="text-lg font-semibold text-white">Payment Details</h3>
+        {(() => {
+          const payment = payments.find((p) => p.id === viewingPayment)
+          if (!payment) return null
+          return (
+            <div className="mt-4 space-y-3 text-sm text-slate-200">
+              <p><strong>Boarder name:</strong> {payment.guest}</p>
+              <p><strong>Room:</strong> {payment.room}</p>
+              <p><strong>Payment amount:</strong> ${payment.amount}</p>
+              <p><strong>Payment date:</strong> {payment.date || 'N/A'}</p>
+              <p><strong>Month:</strong> {(payment.date || payment.dueDate).slice(0, 7) || 'N/A'}</p>
+              <p><strong>Payment method:</strong> {payment.method}</p>
+              <p><strong>Notes:</strong> {payment.notes || 'None'}</p>
+              <p><strong>Remaining due:</strong> ${dueMap[payment.boarderId] ?? 0}</p>
+            </div>
+          )
+        })()}
+      </Modal>
+      <ConfirmModal open={!!confirmDelete} title="Delete payment" message="Are you sure you want to delete this payment?" onConfirm={() => { if (confirmDelete) { removePayment(confirmDelete); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
 
       {/* Payment methods summary */}
       <section className="grid gap-6 xl:grid-cols-2">

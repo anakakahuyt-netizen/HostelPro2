@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { Room } from '../types'
-import { initialRooms } from '../services/mockData'
 import * as databaseAdapter from '../services/database/databaseAdapter'
 import { showToast } from '../services/toast'
 
@@ -14,10 +13,9 @@ interface RoomState {
 }
 
 export const useRoomStore = create<RoomState>((set, get) => {
-  const persisted = databaseAdapter.getRooms()
-  const initial = persisted.length ? persisted : initialRooms
+  const rooms = databaseAdapter.getRooms()
   return {
-    rooms: initial,
+    rooms,
     addRoom: (r) => {
       const exists = get().rooms.find((x) => x.roomNumber === r.roomNumber)
       if (exists) {

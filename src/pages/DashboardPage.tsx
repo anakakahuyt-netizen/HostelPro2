@@ -9,6 +9,9 @@ const iconMap = {
   CreditCard,
   BarChart3,
   Layers2,
+  ArrowUpRight,
+  Wallet,
+  CalendarDays,
 }
 
 const DashboardPage = () => {
@@ -16,33 +19,43 @@ const DashboardPage = () => {
   const rooms = useRoomStore((s) => s.rooms)
   const payments = usePaymentStore((s) => s.payments)
 
-  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
   const totalRooms = rooms.length
-  const totalCapacity = rooms.reduce((s, r) => s + (r.capacity || 0), 0)
-  const totalOccupiedBeds = rooms.reduce((s, r) => s + (r.occupied || 0), 0)
+  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
+  const totalCapacity = rooms.reduce((s, r) => s + r.capacity, 0)
+  const totalOccupiedBeds = rooms.reduce((s, r) => s + r.occupied, 0)
   const availableBeds = Math.max(0, totalCapacity - totalOccupiedBeds)
+  const occupancyRate = totalCapacity ? Math.round((totalOccupiedBeds / totalCapacity) * 100) : 0
 
   const nowMonth = new Date().toISOString().slice(0, 7)
-  const monthlyIncome = payments.filter((p) => p.date && p.date.slice(0, 7) === nowMonth).reduce((s, p) => s + p.amount, 0)
-  const pendingPayments = payments.filter((payment) => payment.status === 'Pending').length
+  const currentMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
+
+  const monthPayments = payments.filter((p) => p.date && p.date.slice(0, 7) === nowMonth)
+  const totalCollected = monthPayments.filter((p) => p.status === 'Paid' || p.status === 'Partial').reduce((s, p) => s + p.amount, 0)
+  const totalPendingPayments = payments.filter((p) => p.status !== 'Paid').length
   const overduePayments = payments.filter((payment) => payment.status === 'Overdue').length
 
-  const pendingDues = boarders.reduce((sum, boarder) => {
-    const paidThisMonth = payments.filter((p) => p.boarderId === boarder.id && p.date && p.date.slice(0, 7) === nowMonth).reduce((s, p) => s + p.amount, 0)
-    return sum + Math.max(0, boarder.monthlyRent - paidThisMonth)
-  }, 0)
+  const boarderDues = boarders.map((boarder) => {
+    const paidThisMonth = payments
+      .filter((p) => p.boarderId === boarder.id && p.date && p.date.slice(0, 7) === nowMonth && (p.status === 'Paid' || p.status === 'Partial'))
+      .reduce((s, p) => s + p.amount, 0)
+    return Math.max(0, boarder.monthlyRent - paidThisMonth)
+  })
+  const totalPendingDues = boarderDues.reduce((s, due) => s + due, 0)
+  const boardersWithDues = boarderDues.filter((due) => due > 0).length
 
   const metrics = [
-    { label: 'Total Boarders', value: String(boarders.length), change: `${occupiedRooms} rooms occupied`, icon: 'Users', accent: 'from-indigo-500 to-sky-500' },
+    { label: 'Total Boarders', value: String(boarders.length), change: `${occupiedRooms} occupied rooms`, icon: 'Users', accent: 'from-indigo-500 to-sky-500' },
     { label: 'Total Rooms', value: String(totalRooms), change: `${availableBeds} beds available`, icon: 'Home', accent: 'from-emerald-500 to-teal-500' },
-    { label: 'Monthly Income', value: `$${monthlyIncome}`, change: `${pendingPayments} pending`, icon: 'CreditCard', accent: 'from-violet-500 to-fuchsia-500' },
-    { label: 'Pending Dues', value: `$${pendingDues}`, change: `${overduePayments} overdue`, icon: 'BarChart3', accent: 'from-slate-500 to-slate-400' },
+    { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${availableBeds} available beds`, icon: 'Layers2', accent: 'from-violet-500 to-fuchsia-500' },
+    { label: 'Available Beds', value: String(availableBeds), change: `${occupancyRate}% occupied`, icon: 'BarChart3', accent: 'from-slate-500 to-slate-400' },
+    { label: 'Monthly Income', value: `$${totalCollected}`, change: `${monthPayments.length} payments this month`, icon: 'CreditCard', accent: 'from-orange-500 to-amber-500' },
+    { label: 'Pending Dues', value: `$${totalPendingDues}`, change: `${boardersWithDues} boarders owed`, icon: 'Wallet', accent: 'from-cyan-500 to-blue-500' },
   ]
 
   const stats = [
-    { title: 'Occupancy Rate', value: `${Math.round((totalOccupiedBeds / Math.max(totalCapacity, 1)) * 100)}%`, trend: `${totalOccupiedBeds} of ${totalCapacity} beds` },
-    { title: 'Late Payments', value: String(overduePayments), trend: `${pendingPayments} pending` },
-    { title: 'Pending Dues', value: `$${pendingDues}`, trend: `${boarders.length} boarders` },
+    { title: 'Occupancy Rate', value: `${occupancyRate}%`, trend: `${totalOccupiedBeds} of ${totalCapacity} beds` },
+    { title: 'Pending Dues', value: `$${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
+    { title: 'Pending Payments', value: String(totalPendingPayments), trend: `${overduePayments} overdue` },
   ]
 
   return (
@@ -60,11 +73,11 @@ const DashboardPage = () => {
           <div className="grid gap-3 sm:grid-cols-2 xl:w-auto xl:grid-cols-1">
             <div className="rounded-3xl bg-slate-900/90 px-4 py-3 text-slate-300 shadow-inner shadow-slate-950/10">
               <p className="text-xs uppercase tracking-[0.32em] text-slate-500">Current period</p>
-              <p className="mt-2 text-sm font-semibold text-white">June 2026</p>
+              <p className="mt-2 text-sm font-semibold text-white">{currentMonthLabel}</p>
             </div>
             <div className="rounded-3xl bg-slate-900/90 px-4 py-3 text-slate-300 shadow-inner shadow-slate-950/10">
               <p className="text-xs uppercase tracking-[0.32em] text-slate-500">Active alerts</p>
-              <p className="mt-2 text-sm font-semibold text-emerald-400">2 new requests</p>
+              <p className="mt-2 text-sm font-semibold text-emerald-400">{overduePayments > 0 ? `${overduePayments} overdue payments` : `${totalPendingPayments} pending payments`}</p>
             </div>
           </div>
         </div>
@@ -75,7 +88,7 @@ const DashboardPage = () => {
             return (
               <div key={metric.label} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 shadow-lg shadow-slate-950/20">
                 <div className={`inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-linear-to-br ${metric.accent} text-white shadow-lg shadow-slate-950/30`}>
-                  <Icon className="h-5 w-5" />
+                  {Icon ? <Icon className="h-5 w-5" /> : null}
                 </div>
                 <p className="mt-5 text-sm uppercase tracking-[0.32em] text-slate-500">{metric.label}</p>
                 <div className="mt-3 flex items-end justify-between gap-4">
@@ -117,21 +130,27 @@ const DashboardPage = () => {
               <p className="text-sm text-slate-400">Latest updates</p>
               <h3 className="mt-2 text-lg font-semibold text-white">Payments and occupancy</h3>
             </div>
-            <Wallet className="h-5 w-5 text-slate-300" />
+            {Wallet ? <Wallet className="h-5 w-5 text-slate-300" /> : null}
           </div>
           <div className="mt-6 space-y-3">
-            {payments.slice(0,4).map((payment) => (
-              <div key={payment.id} className="flex items-center justify-between gap-4 rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-4">
-                <div>
-                  <p className="font-semibold text-slate-100">{payment.guest}</p>
-                  <p className="text-sm text-slate-500">{payment.id}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-semibold text-white">{payment.amount}</p>
-                  <p className="text-sm text-slate-500">{payment.date || 'Pending'}</p>
-                </div>
+            {payments.length === 0 ? (
+              <div className="rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-6 text-center text-slate-400">
+                No payments have been recorded yet.
               </div>
-            ))}
+            ) : (
+              payments.slice(-5).reverse().map((payment) => (
+                <div key={payment.id} className="flex items-center justify-between gap-4 rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-4">
+                  <div>
+                    <p className="font-semibold text-slate-100">{payment.guest}</p>
+                    <p className="text-sm text-slate-500">{payment.id}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-white">${payment.amount}</p>
+                    <p className="text-sm text-slate-500">{payment.date ? payment.date.slice(0, 7) : 'Pending'}</p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
         <div className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5">
@@ -142,17 +161,24 @@ const DashboardPage = () => {
             </div>
           </div>
           <div className="mt-6 space-y-3">
-            {boarders.slice(0,4).map((b) => (
-              <div key={b.id} className="flex items-center justify-between gap-4 rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-4">
-                <div>
-                  <p className="font-semibold text-slate-100">{b.name}</p>
-                  <p className="text-sm text-slate-500">{b.room}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-slate-500">{b.checkIn || '-'}</p>
-                </div>
+            {boarders.length === 0 ? (
+              <div className="rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-6 text-center text-slate-400">
+                No boarders have been added yet.
               </div>
-            ))}
+            ) : (
+              boarders.slice(-5).reverse().map((b) => (
+                <div key={b.id} className="flex items-center justify-between gap-4 rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-4">
+                  <div>
+                    <p className="font-semibold text-slate-100">{b.name}</p>
+                    <p className="text-sm text-slate-500">{b.room}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-slate-500">{b.checkIn || '-'}</p>
+                    <p className="text-xs text-slate-400">{b.status}</p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -165,7 +191,23 @@ const DashboardPage = () => {
             <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Occupancy</p>
             <h3 className="mt-2 text-xl font-semibold text-white">Room utilization</h3>
           </div>
-          <Layers2 className="h-5 w-5 text-slate-400" />
+          {Layers2 ? <Layers2 className="h-5 w-5 text-slate-400" /> : null}
+        </div>
+        <div className="mt-6 rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-slate-400">Occupied beds</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{totalOccupiedBeds}</p>
+            </div>
+            <div>
+              <p className="text-sm text-slate-400">Total beds</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{totalCapacity}</p>
+            </div>
+            <div>
+              <p className="text-sm text-slate-400">Occupancy rate</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{occupancyRate}%</p>
+            </div>
+          </div>
         </div>
         <div className="mt-6 space-y-4">
           {rooms.map((room) => (
@@ -206,28 +248,28 @@ const DashboardPage = () => {
             <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Revenue</p>
             <h3 className="mt-2 text-xl font-semibold text-white">Monthly health</h3>
           </div>
-          <ArrowUpRight className="h-5 w-5 text-slate-400" />
+              {ArrowUpRight ? <ArrowUpRight className="h-5 w-5 text-slate-400" /> : null}
         </div>
         <div className="mt-6 space-y-5">
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Total revenue</p>
-                <p className="mt-2 text-3xl font-semibold text-white">$18.4k</p>
+                <p className="mt-2 text-3xl font-semibold text-white">${totalCollected}</p>
               </div>
-              <span className="rounded-3xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-300">+12%</span>
+              <span className="rounded-3xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-300">{monthPayments.length} this month</span>
             </div>
             <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
-              <div className="h-3 w-3/4 rounded-full bg-linear-to-r from-indigo-500 to-cyan-400" />
+              <div className="h-3 w-full rounded-full bg-linear-to-r from-indigo-500 to-cyan-400" />
             </div>
           </div>
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Expected extension</p>
-                <p className="mt-2 text-2xl font-semibold text-white">$4.8k</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Pending dues</p>
+                <p className="mt-2 text-2xl font-semibold text-white">${totalPendingDues}</p>
               </div>
-              <span className="rounded-3xl bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-300">On track</span>
+              <span className="rounded-3xl bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-300">{boardersWithDues} boarders</span>
             </div>
             <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
               <div className="h-3 w-5/6 rounded-full bg-linear-to-r from-emerald-500 to-lime-400" />
@@ -236,12 +278,12 @@ const DashboardPage = () => {
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Bookings</p>
-                <p className="mt-2 text-2xl font-semibold text-white">42 new</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Pending payments</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{totalPendingPayments}</p>
               </div>
-              <CalendarDays className="h-5 w-5 text-slate-400" />
+              {CalendarDays ? <CalendarDays className="h-5 w-5 text-slate-400" /> : null}
             </div>
-            <p className="mt-4 text-sm text-slate-400">Higher demand from premium boarders this month.</p>
+            <p className="mt-4 text-sm text-slate-400">{overduePayments > 0 ? `${overduePayments} overdue` : 'No overdue payments'}</p>
           </div>
         </div>
       </div>

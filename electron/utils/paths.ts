@@ -1,7 +1,9 @@
 import path from 'path'
 
 export function getPreloadPath(baseDir: string): string {
-  return path.join(baseDir, 'preload.js')
+  // Use a CommonJS preload output so Electron can load it when
+  // package.json is set to "type": "module" and main remains ESM.
+  return path.join(baseDir, 'preload.cjs')
 }
 
 export function getIndexHtmlPath(baseDir: string): string {

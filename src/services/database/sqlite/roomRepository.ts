@@ -1,33 +1,59 @@
 import type { Room } from '../../../types'
-import * as databaseAdapter from '../databaseAdapter'
+import { getDatabase } from '../../../../electron/services/databaseService.js'
 
-// This repository is a preparation layer for SQLite.
-// Future versions will use prepared statements and a real SQLite connection.
 export class RoomRepository {
   getAll(): Room[] {
-    return databaseAdapter.getRooms()
+    const db = getDatabase()
+    return db.prepare('SELECT * FROM rooms').all().map((row: any) => ({
+      ...row,
+      amenities: JSON.parse(row.amenities || '[]'),
+    })) as Room[]
   }
 
   getById(id: string): Room | undefined {
-    return this.getAll().find((room) => room.id === id)
+    const db = getDatabase()
+    const row = db.prepare('SELECT * FROM rooms WHERE id = ?').get(id)
+    if (!row) return undefined
+    const anyRow = row as any
+    return { ...anyRow, amenities: JSON.parse(anyRow.amenities || '[]') } as Room
   }
 
   create(room: Room): void {
-    const rooms = [room, ...this.getAll()]
-    this.saveAll(rooms)
+    const db = getDatabase()
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO rooms (id, roomNumber, name, type, floor, capacity, occupied, price, status, amenities)
+       VALUES (@id, @roomNumber, @name, @type, @floor, @capacity, @occupied, @price, @status, @amenities)`,
+    )
+    stmt.run({ ...room, amenities: JSON.stringify(room.amenities || []) })
   }
 
   update(id: string, patch: Partial<Room>): void {
-    const rooms = this.getAll().map((room) => (room.id === id ? { ...room, ...patch } : room))
-    this.saveAll(rooms)
+    const existing = this.getById(id)
+    if (!existing) return
+    const updated = { ...existing, ...patch }
+    if (patch.amenities) {
+      updated.amenities = patch.amenities
+    }
+    this.create(updated)
   }
 
   remove(id: string): void {
-    const rooms = this.getAll().filter((room) => room.id !== id)
-    this.saveAll(rooms)
+    const db = getDatabase()
+    db.prepare('DELETE FROM rooms WHERE id = ?').run(id)
   }
 
   saveAll(rooms: Room[]): void {
-    databaseAdapter.saveRooms(rooms)
+    const db = getDatabase()
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO rooms (id, roomNumber, name, type, floor, capacity, occupied, price, status, amenities)
+       VALUES (@id, @roomNumber, @name, @type, @floor, @capacity, @occupied, @price, @status, @amenities)`,
+    )
+    const transaction = db.transaction((items: Room[]) => {
+      db.prepare('DELETE FROM rooms').run()
+      for (const room of items) {
+        insert.run({ ...room, amenities: JSON.stringify(room.amenities || []) })
+      }
+    })
+    transaction(rooms)
   }
 }

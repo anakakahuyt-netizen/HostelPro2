@@ -22,6 +22,7 @@ export default function BoardersPage() {
   const [roomFilter, setRoomFilter] = useState('')
   const [openAdd, setOpenAdd] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
+  const [viewing, setViewing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string; message?: string } | null>(null)
 
   const statusStyles = {
@@ -61,6 +62,9 @@ export default function BoardersPage() {
     const q = query.toLowerCase()
     return b.name.toLowerCase().includes(q) || b.phone.toLowerCase().includes(q) || b.room.toLowerCase().includes(q)
   })
+
+  const currentView = boarders.find((b) => b.id === viewing)
+  const viewRoom = currentView ? rooms.find((r) => r.id === currentView.room || r.roomNumber === currentView.room) : undefined
 
   return (
     <div className="space-y-8">
@@ -175,7 +179,7 @@ export default function BoardersPage() {
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
-                      <button className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
+                      <button onClick={() => setViewing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
                         <Eye className="h-4 w-4" />
                       </button>
                       <button onClick={() => setEditing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
@@ -222,6 +226,23 @@ export default function BoardersPage() {
         <div className="mt-4">
           <BoarderForm initial={boarders.find((b) => b.id === editing) || undefined} onSubmit={(b) => { updateBoarder(b.id, b); setEditing(null) }} />
         </div>
+      </Modal>
+
+      <Modal open={!!viewing} onClose={() => setViewing(null)}>
+        <h3 className="text-lg font-semibold text-white">Boarder Details</h3>
+        {currentView && (
+          <div className="mt-4 grid gap-2">
+            <p><strong>Name:</strong> {currentView.name}</p>
+            <p><strong>ID:</strong> {currentView.id}</p>
+            <p><strong>Phone:</strong> {currentView.phone}</p>
+            <p><strong>Email:</strong> {currentView.email}</p>
+            <p><strong>Room:</strong> {viewRoom ? `${viewRoom.name} — ${viewRoom.roomNumber}` : currentView.room}</p>
+            <p><strong>Monthly rent:</strong> ${currentView.monthlyRent}</p>
+            <p><strong>Check-in date:</strong> {currentView.checkIn}</p>
+            <p><strong>Status:</strong> {currentView.status}</p>
+            <p><strong>Due amount:</strong> ${dueMap[currentView.id] ?? 0}</p>
+          </div>
+        )}
       </Modal>
 
       <ConfirmModal open={!!confirmDelete} title="Delete boarder" message={confirmDelete?.message ?? confirmDelete?.name} onConfirm={() => { if (confirmDelete) { removeBoarder(confirmDelete.id); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />

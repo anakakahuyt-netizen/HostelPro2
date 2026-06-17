@@ -1,5 +1,4 @@
 import type { Boarder, Room, Payment } from '../types'
-import { showToast } from './toast'
 
 const BOARDER_KEY = 'hostelpro_boarders'
 const ROOM_KEY = 'hostelpro_rooms'
@@ -20,7 +19,6 @@ export function saveBoarders(boarders: Boarder[]) {
     localStorage.setItem(BOARDER_KEY, JSON.stringify(boarders))
   } catch (err) {
     console.error('saveBoarders error', err)
-    showToast('Failed to save boarders')
   }
 }
 
@@ -39,7 +37,6 @@ export function saveRooms(rooms: Room[]) {
     localStorage.setItem(ROOM_KEY, JSON.stringify(rooms))
   } catch (err) {
     console.error('saveRooms error', err)
-    showToast('Failed to save rooms')
   }
 }
 
@@ -58,7 +55,6 @@ export function savePayments(payments: Payment[]) {
     localStorage.setItem(PAYMENT_KEY, JSON.stringify(payments))
   } catch (err) {
     console.error('savePayments error', err)
-    showToast('Failed to save payments')
   }
 }
 

@@ -27,7 +27,7 @@ export interface Room {
   amenities: string[]
 }
 
-export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue'
+export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial' | 'Due'
 
 export interface Payment {
   id: string
@@ -39,4 +39,5 @@ export interface Payment {
   dueDate: string
   status: PaymentStatus
   method: string
+  notes?: string
 }

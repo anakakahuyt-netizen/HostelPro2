@@ -1,5 +1,5 @@
 import type { Boarder } from '../../types'
-import * as storage from '../storageService'
+import * as storage from '../storageService.js'
 
 export function getAll(): Boarder[] {
   return storage.getBoarders()

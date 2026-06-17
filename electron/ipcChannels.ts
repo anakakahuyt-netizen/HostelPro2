@@ -22,6 +22,8 @@ export const PAYMENT_CHANNELS = {
   SAVE: SAVE_PAYMENTS,
 }
 
+export const MIGRATE_LOCAL_STORAGE = 'electron:migrate-local-storage'
+
 // Future IPC handlers will use these channel names in the Electron main process.
 // Example:
 // ipcMain.handle(ipcChannels.GET_BOARDERS, () => database.getBoarders())

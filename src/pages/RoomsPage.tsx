@@ -14,11 +14,13 @@ const iconMap = {
 }
 
 export default function RoomsPage() {
-  const statusStyles = {
+  const statusStyles: Record<string, string> = {
     Available: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
     Occupied: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
     Limited: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
     Maintenance: 'bg-slate-500/15 text-slate-300 border border-slate-500/30',
+    Full: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+    Empty: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
   }
  
   const rooms = useRoomStore((s) => s.rooms)
@@ -29,26 +31,35 @@ export default function RoomsPage() {
 
   const [openAdd, setOpenAdd] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
+  const [viewing, setViewing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleteWarning, setDeleteWarning] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   const roomsWithCounts = useMemo(() => rooms
     .map((r) => {
       const occupied = boarders.filter((b) => b.room === r.id || b.room === r.roomNumber).length
-      return { ...r, occupied, available: Math.max(0, r.capacity - occupied) }
+      const available = Math.max(0, r.capacity - occupied)
+      const occupancyStatus = r.status === 'Maintenance'
+        ? 'Maintenance'
+        : occupied === 0
+        ? 'Empty'
+        : occupied >= r.capacity
+        ? 'Full'
+        : 'Available'
+      return { ...r, occupied, available, occupancyStatus }
     })
     .filter((room) =>
-      room.name?.toLowerCase().includes(query.toLowerCase()) ||
-      room.roomNumber.toLowerCase().includes(query.toLowerCase()) ||
-      room.type.toLowerCase().includes(query.toLowerCase())
+      room.roomNumber.toLowerCase().includes(query.toLowerCase()) &&
+      (!statusFilter || room.occupancyStatus === statusFilter)
     ),
-  [rooms, boarders, query])
+  [rooms, boarders, query, statusFilter])
 
   const total = roomsWithCounts.length
   const occupiedCount = roomsWithCounts.reduce((c, r) => c + (r.occupied > 0 ? 1 : 0), 0)
   const availableCount = roomsWithCounts.filter((r) => r.available > 0).length
-  const maintenanceCount = roomsWithCounts.filter((r) => r.status === 'Maintenance').length
+  const maintenanceCount = roomsWithCounts.filter((r) => r.occupancyStatus === 'Maintenance').length
 
   return (
     <div className="space-y-8">
@@ -100,12 +111,19 @@ export default function RoomsPage() {
             <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by room name, floor, or type..."
+              placeholder="Search by room number..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-2xl border border-slate-700 bg-slate-950 py-3 pl-12 pr-4 text-slate-100 placeholder-slate-500 transition focus:border-sky-500 focus:outline-none"
             />
           </div>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4 text-slate-100">
+            <option value="">All statuses</option>
+            <option value="Available">Available</option>
+            <option value="Full">Full</option>
+            <option value="Empty">Empty</option>
+            <option value="Maintenance">Maintenance</option>
+          </select>
           <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
             <Filter className="h-5 w-5" />
             Filters
@@ -123,8 +141,8 @@ export default function RoomsPage() {
                 <h3 className="mt-2 text-xl font-semibold text-white">{room.name}</h3>
                 <p className="mt-1 text-sm text-slate-400">{room.type} Room • Floor {room.floor}</p>
               </div>
-              <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[room.status]}`}>
-                {room.status}
+              <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[room.occupancyStatus]}`}>
+                {room.occupancyStatus}
               </span>
             </div>
 
@@ -170,7 +188,7 @@ export default function RoomsPage() {
             </div>
 
             <div className="flex items-center gap-2 border-t border-slate-800/50 pt-6">
-              <button className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
+              <button onClick={() => setViewing(room.id)} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
                 <Eye className="h-4 w-4" />
               </button>
               <button onClick={() => setEditing(room.id)} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
@@ -205,8 +223,25 @@ export default function RoomsPage() {
         </div>
       </Modal>
 
+      <Modal open={!!viewing} onClose={() => setViewing(null)}>
+        <h3 className="text-lg font-semibold text-white">Room Details</h3>
+        {(() => {
+          const room = roomsWithCounts.find((r) => r.id === viewing)
+          return room ? (
+            <div className="mt-4 space-y-3 text-sm text-slate-200">
+              <p><strong>Room number:</strong> {room.roomNumber}</p>
+              <p><strong>Capacity:</strong> {room.capacity}</p>
+              <p><strong>Occupied beds:</strong> {room.occupied}</p>
+              <p><strong>Available beds:</strong> {room.available}</p>
+              <p><strong>Monthly rent:</strong> ${room.price}</p>
+              <p><strong>Status:</strong> {room.occupancyStatus}</p>
+            </div>
+          ) : null
+        })()}
+      </Modal>
+
       <ConfirmModal open={!!confirmDelete} title="Delete room" message={confirmDelete || ''} onConfirm={() => { if (confirmDelete) { removeRoom(confirmDelete); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
-      <ConfirmModal open={!!deleteWarning} title="Cannot delete room" message={deleteWarning || ''} onConfirm={() => { setDeleteWarning(null) }} onCancel={() => setDeleteWarning(null)} />
+      <ConfirmModal open={!!deleteWarning} title="Cannot delete room" message="This room contains active boarders and cannot be deleted." onConfirm={() => { setDeleteWarning(null) }} onCancel={() => setDeleteWarning(null)} />
 
       {/* Room statistics */}
       <section className="grid gap-6 xl:grid-cols-3">

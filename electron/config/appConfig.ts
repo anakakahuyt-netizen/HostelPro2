@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { isDev } from '../utils/isDev'
+import { isDev } from '../utils/isDev.js'
 
 export function getUserDataPath() {
   return app.getPath('userData')

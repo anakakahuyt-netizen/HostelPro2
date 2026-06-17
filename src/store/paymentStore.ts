@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { Payment } from '../types'
-import { initialPayments } from '../services/mockData'
 import * as databaseAdapter from '../services/database/databaseAdapter'
 import { showToast } from '../services/toast'
 
@@ -14,10 +13,9 @@ interface PaymentState {
 }
 
 export const usePaymentStore = create<PaymentState>((set, get) => {
-  const persisted = databaseAdapter.getPayments()
-  const initial = persisted.length ? persisted : initialPayments
+  const payments = databaseAdapter.getPayments()
   return {
-    payments: initial,
+    payments,
     addPayment: (p) => {
       if (p.amount < 0) {
         showToast('Payment amount cannot be negative')

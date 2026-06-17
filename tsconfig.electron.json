@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "outDir": "./dist-electron",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["electron/**/*.ts", "src/types/**/*.ts", "src/services/database/**/*.ts", "src/services/storageService.ts", "src/services/api/**/*.ts"],
+  "exclude": ["node_modules", "dist", "dist-electron", "src/services/toast.ts", "src/services/export.ts", "src/services/backup.ts", "src/**/*.tsx"]
+}

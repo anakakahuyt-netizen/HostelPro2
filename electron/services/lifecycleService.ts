@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron'
+import { closeDatabase } from './databaseService.js'
 
 let mainWindow: BrowserWindow | null = null
 const singleInstanceLock = app.requestSingleInstanceLock()
@@ -30,7 +31,7 @@ export function closeMainWindow() {
 
 export function setupGracefulShutdown() {
   app.on('before-quit', () => {
-    // TODO: close the SQLite database connection and clean up resources before quitting.
+    closeDatabase()
   })
 }
 

@@ -1,7 +1,7 @@
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
-import * as storage from './storageService'
+import * as databaseAdapter from './database/databaseAdapter'
 
 export function exportBackup() {
   const data = {
@@ -22,16 +22,33 @@ export function exportBackup() {
 
 export async function importBackup(file: File) {
   const text = await file.text()
-  const obj = JSON.parse(text)
-  const boarders = obj.boarders || []
-  const rooms = obj.rooms || []
-  const payments = obj.payments || []
+  let obj: unknown
+  try {
+    obj = JSON.parse(text)
+  } catch {
+    throw new Error('Invalid JSON file')
+  }
+
+  if (!obj || typeof obj !== 'object') {
+    throw new Error('Invalid backup format')
+  }
+
+  const backup = obj as Record<string, unknown>
+  if (!Array.isArray(backup.boarders) || !Array.isArray(backup.rooms) || !Array.isArray(backup.payments)) {
+    throw new Error('Invalid backup format')
+  }
+
+  const boarders = backup.boarders as any[]
+  const rooms = backup.rooms as any[]
+  const payments = backup.payments as any[]
+
   useBoarderStore.setState({ boarders })
-  storage.saveBoarders(boarders)
   useRoomStore.setState({ rooms })
-  storage.saveRooms(rooms)
   usePaymentStore.setState({ payments })
-  storage.savePayments(payments)
+
+  databaseAdapter.saveBoarders(boarders)
+  databaseAdapter.saveRooms(rooms)
+  databaseAdapter.savePayments(payments)
 }
 
 export default { exportBackup, importBackup }

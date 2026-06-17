@@ -1,33 +1,50 @@
 import type { Payment } from '../../../types'
-import * as databaseAdapter from '../databaseAdapter'
+import { getDatabase } from '../../../../electron/services/databaseService.js'
 
-// This repository is a preparation layer for SQLite.
-// Future versions will use prepared statements and a real SQLite connection.
 export class PaymentRepository {
   getAll(): Payment[] {
-    return databaseAdapter.getPayments()
+    const db = getDatabase()
+    return db.prepare('SELECT * FROM payments').all() as Payment[]
   }
 
   getById(id: string): Payment | undefined {
-    return this.getAll().find((payment) => payment.id === id)
+    const db = getDatabase()
+    return db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as Payment | undefined
   }
 
   create(payment: Payment): void {
-    const payments = [payment, ...this.getAll()]
-    this.saveAll(payments)
+    const db = getDatabase()
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO payments (id, boarderId, guest, room, amount, date, dueDate, status, method, notes)
+       VALUES (@id, @boarderId, @guest, @room, @amount, @date, @dueDate, @status, @method, @notes)`,
+    )
+    stmt.run(payment)
   }
 
   update(id: string, patch: Partial<Payment>): void {
-    const payments = this.getAll().map((payment) => (payment.id === id ? { ...payment, ...patch } : payment))
-    this.saveAll(payments)
+    const existing = this.getById(id)
+    if (!existing) return
+    const updated = { ...existing, ...patch }
+    this.create(updated)
   }
 
   remove(id: string): void {
-    const payments = this.getAll().filter((payment) => payment.id !== id)
-    this.saveAll(payments)
+    const db = getDatabase()
+    db.prepare('DELETE FROM payments WHERE id = ?').run(id)
   }
 
   saveAll(payments: Payment[]): void {
-    databaseAdapter.savePayments(payments)
+    const db = getDatabase()
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO payments (id, boarderId, guest, room, amount, date, dueDate, status, method, notes)
+       VALUES (@id, @boarderId, @guest, @room, @amount, @date, @dueDate, @status, @method, @notes)`,
+    )
+    const transaction = db.transaction((items: Payment[]) => {
+      db.prepare('DELETE FROM payments').run()
+      for (const payment of items) {
+        insert.run(payment)
+      }
+    })
+    transaction(payments)
   }
 }

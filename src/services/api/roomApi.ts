@@ -1,5 +1,5 @@
 import type { Room } from '../../types'
-import * as storage from '../storageService'
+import * as storage from '../storageService.js'
 
 export function getAll(): Room[] {
   return storage.getRooms()

@@ -3,6 +3,7 @@ import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
 import { downloadCSV } from '../services/export'
+import { showToast } from '../services/toast'
 
 interface Report {
   id: string
@@ -14,31 +15,21 @@ interface Report {
   fileSize: string
 }
 
-const reports: Report[] = [
-  { id: 'RPT-001', name: 'Monthly Occupancy Report', type: 'Occupancy', period: 'June 2026', status: 'Completed', generatedDate: '2026-06-15', fileSize: '2.4 MB' },
-  { id: 'RPT-002', name: 'Financial Summary', type: 'Financial', period: 'Q2 2026', status: 'Completed', generatedDate: '2026-06-14', fileSize: '3.1 MB' },
-  { id: 'RPT-003', name: 'Maintenance Requests', type: 'Maintenance', period: 'May-June 2026', status: 'Completed', generatedDate: '2026-06-10', fileSize: '1.8 MB' },
-  { id: 'RPT-004', name: 'Guest Satisfaction Survey', type: 'Guest', period: 'Q2 2026', status: 'In Progress', generatedDate: '2026-06-12', fileSize: '-' },
-  { id: 'RPT-005', name: 'Quarterly Performance Review', type: 'Financial', period: 'Q2 2026', status: 'Pending', generatedDate: '', fileSize: '-' },
-]
-
-const analytics = [
-  { label: 'Avg. Occupancy Rate', value: '87.5%', change: '+3.2%', icon: TrendingUp, accent: 'from-emerald-500 to-teal-500' },
-  { label: 'Total Revenue', value: '$52.4k', change: '+12.8%', icon: TrendingUp, accent: 'from-sky-500 to-indigo-500' },
-  { label: 'Guest Satisfaction', value: '4.6/5.0', change: '+0.3', icon: TrendingUp, accent: 'from-violet-500 to-fuchsia-500' },
-  { label: 'Maintenance Issues', value: '14', change: '-2 vs last month', icon: TrendingUp, accent: 'from-orange-500 to-red-500' },
-]
-
 export default function ReportsPage() {
   const boarders = useBoarderStore((s) => s.boarders)
   const rooms = useRoomStore((s) => s.rooms)
   const payments = usePaymentStore((s) => s.payments)
 
-  const nowMonth = new Date().toISOString().slice(0,7)
+  const nowMonth = new Date().toISOString().slice(0, 7)
+  const currentMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
+  const previousMonthDate = new Date()
+  previousMonthDate.setMonth(previousMonthDate.getMonth() - 1)
+  const previousMonthKey = previousMonthDate.toISOString().slice(0, 7)
+  const previousMonthLabel = previousMonthDate.toLocaleString('default', { month: 'long', year: 'numeric' })
 
-  const monthlyIncomeReport = payments.reduce<Record<string, number>>((acc, p) => {
-    const m = (p.date || '').slice(0,7) || nowMonth
-    acc[m] = (acc[m] || 0) + p.amount
+  const monthlyIncomeReport = payments.reduce<Record<string, number>>((acc, payment) => {
+    const month = payment.date?.slice(0, 7) || nowMonth
+    acc[month] = (acc[month] || 0) + payment.amount
     return acc
   }, {})
 
@@ -48,6 +39,74 @@ export default function ReportsPage() {
   })
 
   const occupancyReport = rooms.map((r) => ({ id: r.id, name: r.name, roomNumber: r.roomNumber, capacity: r.capacity, occupied: r.occupied, occupancyRate: r.capacity ? Math.round((r.occupied / r.capacity) * 100) : 0 }))
+
+  const reports: Report[] = [
+    {
+      id: 'RPT-BOARDERS',
+      name: 'Boarder Roster',
+      type: 'Guest',
+      period: currentMonthLabel,
+      status: boarders.length ? 'Completed' : 'Pending',
+      generatedDate: boarders.length ? new Date().toISOString().slice(0, 10) : '',
+      fileSize: `${Math.max(1, Math.round(boarders.length * 0.25))}.0 MB`,
+    },
+    {
+      id: 'RPT-PAYMENTS',
+      name: 'Payment Summary',
+      type: 'Financial',
+      period: currentMonthLabel,
+      status: payments.length ? 'Completed' : 'Pending',
+      generatedDate: payments.length ? new Date().toISOString().slice(0, 10) : '',
+      fileSize: `${Math.max(1, Math.round(payments.length * 0.15))}.0 MB`,
+    },
+    {
+      id: 'RPT-OCCUPANCY',
+      name: 'Occupancy Overview',
+      type: 'Occupancy',
+      period: currentMonthLabel,
+      status: rooms.length ? 'Completed' : 'Pending',
+      generatedDate: rooms.length ? new Date().toISOString().slice(0, 10) : '',
+      fileSize: `${Math.max(1, Math.round(rooms.length * 0.2))}.0 MB`,
+    },
+  ]
+
+  const totalBoarders = boarders.length
+  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
+  const availableRooms = rooms.filter((room) => room.occupied < room.capacity).length
+
+  const monthlyIncome = payments
+    .filter((payment) => payment.date && payment.date.slice(0,7) === nowMonth)
+    .reduce((sum, payment) => sum + payment.amount, 0)
+
+  const boarderDues = boarders.map((boarder) => {
+    const paid = payments
+      .filter((payment) => payment.boarderId === boarder.id)
+      .reduce((sum, payment) => sum + payment.amount, 0)
+    return Math.max(0, boarder.monthlyRent - paid)
+  })
+
+  const totalPendingDues = boarderDues.reduce((sum, due) => sum + due, 0)
+  const boardersWithDues = boarderDues.filter((due) => due > 0).length
+  const summaryMetrics = [
+    { label: 'Total Boarders', value: String(totalBoarders), change: `${boardersWithDues} with dues`, icon: PieChart, accent: 'from-indigo-500 to-sky-500' },
+    { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${availableRooms} available`, icon: BarChart3, accent: 'from-emerald-500 to-teal-500' },
+    { label: 'Monthly Income', value: `$${monthlyIncome}`, change: `${currentMonthLabel}`, icon: TrendingUp, accent: 'from-sky-500 to-indigo-500' },
+    { label: 'Pending Dues', value: `$${totalPendingDues}`, change: `${boardersWithDues} boarders owed`, icon: Download, accent: 'from-violet-500 to-fuchsia-500' },
+  ]
+
+  const keyMetrics = [
+    { metric: 'Total Boarders', value: String(totalBoarders), trend: `${boardersWithDues} with dues` },
+    { metric: 'Occupied Rooms', value: String(occupiedRooms), trend: `${availableRooms} available` },
+    { metric: 'Monthly Income', value: `$${monthlyIncome}`, trend: `${payments.filter((payment) => payment.date?.slice(0,7) === nowMonth).length} payments` },
+    { metric: 'Pending Dues', value: `$${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
+  ]
+
+  const previousIncome = monthlyIncomeReport[previousMonthKey] || 0
+  const incomeChangePercent = previousIncome > 0 ? ((monthlyIncome - previousIncome) / previousIncome) * 100 : 0
+  const comparisonMonths = [
+    { month: previousMonthLabel, revenue: `$${previousIncome}`, change: previousIncome ? Number((((monthlyIncome - previousIncome) / previousIncome) * 100).toFixed(1)) : 0 },
+    { month: currentMonthLabel, revenue: `$${monthlyIncome}`, change: incomeChangePercent > 0 ? Number(incomeChangePercent.toFixed(1)) : Number((incomeChangePercent || 0).toFixed(1)) },
+  ]
 
   const totalBoardersReport = { total: boarders.length }
   const exportTotalBoarders = () => {
@@ -98,7 +157,7 @@ export default function ReportsPage() {
             <h1 className="mt-2 text-4xl font-bold text-white">Reports & Analytics</h1>
             <p className="mt-3 text-slate-400">View comprehensive reports and business analytics</p>
           </div>
-          <button className="inline-flex items-center gap-2 rounded-3xl bg-linear-to-r from-violet-500 to-fuchsia-500 px-6 py-3 font-semibold text-white shadow-lg shadow-violet-500/30 transition hover:shadow-lg hover:shadow-violet-500/50">
+          <button onClick={() => showToast('Report generation is not available in preview')} className="inline-flex items-center gap-2 rounded-3xl bg-linear-to-r from-violet-500 to-fuchsia-500 px-6 py-3 font-semibold text-white shadow-lg shadow-violet-500/30 transition hover:shadow-lg hover:shadow-violet-500/50">
             <BarChart3 className="h-5 w-5" />
             Generate Report
           </button>
@@ -106,7 +165,7 @@ export default function ReportsPage() {
 
         {/* Analytics cards */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {analytics.map((stat) => {
+          {summaryMetrics.map((stat) => {
             const Icon = stat.icon
             return (
               <div key={stat.label} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 shadow-lg shadow-slate-950/20">
@@ -133,12 +192,12 @@ export default function ReportsPage() {
             <Calendar className="h-5 w-5" />
             Date Range
           </button>
-          <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
+          <button onClick={() => showToast('Report type filtering is not available in preview')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
             <Filter className="h-5 w-5" />
             Report Type
           </button>
           <div className="flex-1" />
-          <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
+          <button onClick={() => showToast('Use the CSV export buttons for actual exports')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
             <Download className="h-5 w-5" />
             Export
           </button>
@@ -154,6 +213,24 @@ export default function ReportsPage() {
       </section>
 
       {/* Reports table */}
+      {boarders.length === 0 || payments.length === 0 ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {boarders.length === 0 ? (
+            <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 text-slate-400">
+              <p className="text-sm uppercase tracking-[0.28em] text-slate-500">No boarders</p>
+              <h3 className="mt-3 text-xl font-semibold text-white">Boarder data is empty</h3>
+              <p className="mt-2 text-sm">Add boarders to enable occupancy and dues reports.</p>
+            </div>
+          ) : null}
+          {payments.length === 0 ? (
+            <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 text-slate-400">
+              <p className="text-sm uppercase tracking-[0.28em] text-slate-500">No payments</p>
+              <h3 className="mt-3 text-xl font-semibold text-white">Financial reports are empty</h3>
+              <p className="mt-2 text-sm">Record payments to generate monthly income and dues summaries.</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <section className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
         <div className="mb-6 flex items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-white">Generated Reports</h2>
@@ -216,12 +293,7 @@ export default function ReportsPage() {
             <BarChart3 className="h-5 w-5 text-slate-400" />
           </div>
           <div className="space-y-4">
-            {[
-              { metric: 'Total Boarders YTD', value: '145', trend: '+18%' },
-              { metric: 'Occupancy Trend', value: '87.5%', trend: '+5.2%' },
-              { metric: 'Revenue Growth', value: '$52.4k', trend: '+12.8%' },
-              { metric: 'Repeat Guests', value: '34%', trend: '+3.1%' },
-            ].map((item) => (
+            {keyMetrics.map((item) => (
               <div key={item.metric} className="flex items-center justify-between rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
                 <p className="text-sm font-medium text-slate-300">{item.metric}</p>
                 <div className="flex items-center gap-2">
@@ -239,19 +311,15 @@ export default function ReportsPage() {
             <PieChart className="h-5 w-5 text-slate-400" />
           </div>
           <div className="space-y-4">
-            {[
-              { month: 'May 2026', revenue: '$48.2k', change: -4.1 },
-              { month: 'June 2026', revenue: '$52.4k', change: 8.7 },
-              { month: 'July 2026', revenue: '$58.1k', change: 10.9 },
-            ].map((item) => (
+            {comparisonMonths.map((item) => (
               <div key={item.month}>
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <p className="text-sm font-medium text-slate-300">{item.month}</p>
                   <div className="flex items-center gap-2">
                     <p className="font-semibold text-white">{item.revenue}</p>
-                    {item.change > 0 ? (
+                    {Number(item.change) >= 0 ? (
                       <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-medium text-emerald-300">
-                        <ArrowUp className="h-3 w-3" /> {item.change}%
+                        <ArrowUp className="h-3 w-3" /> {Math.abs(item.change)}%
                       </span>
                     ) : (
                       <span className="flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-1 text-xs font-medium text-rose-300">
@@ -262,8 +330,8 @@ export default function ReportsPage() {
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
-                  className="h-2 rounded-full bg-linear-to-r from-violet-500 to-fuchsia-500"
-                    style={{ width: `${Math.min((parseFloat(item.revenue) / 70) * 100, 100)}%` }}
+                    className="h-2 rounded-full bg-linear-to-r from-violet-500 to-fuchsia-500"
+                    style={{ width: `${Math.min((parseFloat(item.revenue.replace(/[^\d.]/g, '')) / 70000) * 100, 100)}%` }}
                   />
                 </div>
               </div>

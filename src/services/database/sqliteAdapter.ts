@@ -1,39 +1,55 @@
-import * as boarderApi from '../api/boarderApi'
-import * as roomApi from '../api/roomApi'
-import * as paymentApi from '../api/paymentApi'
 import type { Boarder, Room, Payment } from '../../types'
+import {
+  GET_BOARDERS,
+  SAVE_BOARDERS,
+  GET_ROOMS,
+  SAVE_ROOMS,
+  GET_PAYMENTS,
+  SAVE_PAYMENTS,
+} from '../../../electron/ipcChannels.js'
 
-// sqliteAdapter is the place to hook into Electron IPC and a real SQLite driver
-// later. For now, it proxies through the existing API layer.
+function getElectronApi(): { sendSync: (channel: string, ...args: unknown[]) => unknown } | null {
+  const anyGlobal = globalThis as unknown as { electron?: unknown }
+  const electronApi = anyGlobal.electron as any
+  if (!electronApi || typeof electronApi.sendSync !== 'function') {
+    return null
+  }
+  return electronApi
+}
+
+function invokeSync<T>(channel: string, ...args: unknown[]): T {
+  const electronApi = getElectronApi()
+  if (!electronApi) {
+    console.warn('[sqliteAdapter] Electron API unavailable for', channel)
+    return [] as unknown as T
+  }
+
+  const result = electronApi.sendSync(channel, ...args)
+  return (result ?? ([] as unknown)) as T
+}
 
 export function getBoarders(): Boarder[] {
-  // TODO: replace with IPC call to main process using Electron and better-sqlite3
-  return boarderApi.getAll()
+  return invokeSync<Boarder[]>(GET_BOARDERS) || []
 }
 
 export function saveBoarders(boarders: Boarder[]) {
-  // TODO: update with SQLite persistence via Electron IPC
-  boarderApi.saveAll(boarders)
+  invokeSync<boolean>(SAVE_BOARDERS, boarders)
 }
 
 export function getRooms(): Room[] {
-  // TODO: replace with IPC call to main process using Electron and better-sqlite3
-  return roomApi.getAll()
+  return invokeSync<Room[]>(GET_ROOMS) || []
 }
 
 export function saveRooms(rooms: Room[]) {
-  // TODO: update with SQLite persistence via Electron IPC
-  roomApi.saveAll(rooms)
+  invokeSync<boolean>(SAVE_ROOMS, rooms)
 }
 
 export function getPayments(): Payment[] {
-  // TODO: replace with IPC call to main process using Electron and better-sqlite3
-  return paymentApi.getAll()
+  return invokeSync<Payment[]>(GET_PAYMENTS) || []
 }
 
 export function savePayments(payments: Payment[]) {
-  // TODO: update with SQLite persistence via Electron IPC
-  paymentApi.saveAll(payments)
+  invokeSync<boolean>(SAVE_PAYMENTS, payments)
 }
 
 export default { getBoarders, saveBoarders, getRooms, saveRooms, getPayments, savePayments }

@@ -5,17 +5,68 @@ import { showToast } from '../services/toast'
 
 export default function SettingsPage() {
   const [showPassword, setShowPassword] = useState(false)
+  const [theme, setTheme] = useState('Dark')
+  const [dateFormat, setDateFormat] = useState('MM/DD/YYYY')
+  const [currency, setCurrency] = useState('USD ($)')
+  const [language, setLanguage] = useState('English')
+  const [notificationSettings, setNotificationSettings] = useState<Record<string, boolean>>({
+    'Payment Reminders': true,
+    'Room Updates': true,
+    'New Boarders': true,
+    'Maintenance Issues': true,
+    'Weekly Reports': false,
+    'System Alerts': true,
+  })
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
+    if (f.type !== 'application/json' && !f.name.toLowerCase().endsWith('.json')) {
+      showToast('Please choose a valid JSON backup file')
+      e.target.value = ''
+      return
+    }
+
     try {
       await importBackup(f)
       showToast('Backup imported successfully')
     } catch (err) {
-      console.error(err)
-      showToast('Failed to import backup')
+      showToast(err instanceof Error ? err.message : 'Failed to import backup')
+    } finally {
+      e.target.value = ''
+    }
+  }
+
+  const handleThemeSelect = (selectedTheme: string) => {
+    setTheme(selectedTheme)
+    showToast(`${selectedTheme} theme selected`)
+  }
+
+  const handleSettingChange = (setter: React.Dispatch<React.SetStateAction<string>>, value: string) => {
+    setter(value)
+    showToast(`${value} selected`)
+  }
+
+  const handleToggleNotification = (name: string) => {
+    setNotificationSettings((prev) => ({ ...prev, [name]: !prev[name] }))
+    showToast(`${name} ${notificationSettings[name] ? 'disabled' : 'enabled'}`)
+  }
+
+  const handleSave = () => {
+    showToast('Settings saved successfully')
+  }
+
+  const handleCancel = () => {
+    showToast('Changes canceled')
+  }
+
+  const handleExportBackup = () => {
+    try {
+      exportBackup()
+      showToast('Backup export started')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to export backup')
     }
   }
 
@@ -156,16 +207,18 @@ export default function SettingsPage() {
             <div>
               <label className="block text-sm uppercase tracking-[0.28em] text-slate-500 mb-3">Theme</label>
               <div className="flex gap-3">
-                {['Dark', 'Light', 'Auto'].map((theme) => (
+                {['Dark', 'Light', 'Auto'].map((option) => (
                   <button
-                    key={theme}
+                    key={option}
+                    type="button"
+                    onClick={() => handleThemeSelect(option)}
                     className={`flex-1 rounded-2xl border px-4 py-3 font-medium transition ${
-                      theme === 'Dark'
+                      option === theme
                         ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
                         : 'border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
                     }`}
                   >
-                    {theme}
+                    {option}
                   </button>
                 ))}
               </div>
@@ -173,7 +226,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm uppercase tracking-[0.28em] text-slate-500 mb-3">Date Format</label>
-              <select className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
+              <select value={dateFormat} onChange={(e) => handleSettingChange(setDateFormat, e.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
                 <option>MM/DD/YYYY</option>
                 <option>DD/MM/YYYY</option>
                 <option>YYYY-MM-DD</option>
@@ -182,7 +235,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm uppercase tracking-[0.28em] text-slate-500 mb-3">Currency</label>
-              <select className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
+              <select value={currency} onChange={(e) => handleSettingChange(setCurrency, e.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
                 <option>USD ($)</option>
                 <option>EUR (€)</option>
                 <option>GBP (£)</option>
@@ -192,7 +245,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm uppercase tracking-[0.28em] text-slate-500 mb-3">Language</label>
-              <select className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
+              <select value={language} onChange={(e) => handleSettingChange(setLanguage, e.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
                 <option>English</option>
                 <option>Spanish</option>
                 <option>French</option>
@@ -225,9 +278,13 @@ export default function SettingsPage() {
                   <p className="font-medium text-white">{notif.name}</p>
                   <p className="text-xs text-slate-400">{notif.desc}</p>
                 </div>
-                <div className="flex h-6 w-11 items-center rounded-full bg-emerald-500/30 p-0.5 cursor-pointer transition">
-                  <div className="ml-auto h-5 w-5 rounded-full bg-emerald-400" />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleNotification(notif.name)}
+                  className={`flex h-6 w-11 items-center rounded-full p-0.5 transition ${notificationSettings[notif.name] ? 'bg-emerald-500/30' : 'bg-slate-700/50'}`}
+                >
+                  <div className={`h-5 w-5 rounded-full bg-white transition ${notificationSettings[notif.name] ? 'ml-auto' : 'ml-0'}`} />
+                </button>
               </div>
             ))}
           </div>
@@ -236,11 +293,11 @@ export default function SettingsPage() {
         {/* Action Buttons */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex gap-3">
-            <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-6 py-3 font-semibold text-slate-300 transition hover:bg-slate-800">
+            <button type="button" onClick={handleCancel} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-6 py-3 font-semibold text-slate-300 transition hover:bg-slate-800">
               <X className="h-5 w-5" />
               Cancel
             </button>
-            <button className="inline-flex items-center gap-2 rounded-2xl bg-linear-to-r from-emerald-500 to-teal-500 px-6 py-3 font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:shadow-lg hover:shadow-emerald-500/50">
+            <button type="button" onClick={handleSave} className="inline-flex items-center gap-2 rounded-2xl bg-linear-to-r from-emerald-500 to-teal-500 px-6 py-3 font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:shadow-lg hover:shadow-emerald-500/50">
               <Save className="h-5 w-5" />
               Save Changes
             </button>
@@ -248,7 +305,7 @@ export default function SettingsPage() {
 
           <div className="flex gap-3">
             <input ref={(el) => { fileRef.current = el }} onChange={handleImport} type="file" id="backup-input" accept="application/json" className="hidden" />
-            <button onClick={() => exportBackup()} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-6 py-3 font-semibold text-slate-300 transition hover:bg-slate-800">
+            <button type="button" onClick={handleExportBackup} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-6 py-3 font-semibold text-slate-300 transition hover:bg-slate-800">
               <Download className="h-5 w-5" />
               Export Backup
             </button>

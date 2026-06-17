@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { Boarder } from '../types'
-import { initialBoarders } from '../services/mockData'
 import { useRoomStore } from './roomStore'
 import * as databaseAdapter from '../services/database/databaseAdapter'
 import { showToast } from '../services/toast'
@@ -15,10 +14,9 @@ interface BoarderState {
 }
 
 export const useBoarderStore = create<BoarderState>((set, get) => {
-  const persisted = databaseAdapter.getBoarders()
-  const initial = persisted.length ? persisted : initialBoarders
+  const boarders = databaseAdapter.getBoarders()
   return {
-    boarders: initial,
+    boarders,
     addBoarder: (b) => {
       const roomsApi = useRoomStore.getState()
       const room = roomsApi.rooms.find((r) => r.id === b.room || r.roomNumber === b.room)

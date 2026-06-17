@@ -1,4 +1,4 @@
-import * as sqliteAdapter from './sqliteAdapter'
+import * as sqliteAdapter from './sqliteAdapter.js'
 import type { Boarder, Room, Payment } from '../../types'
 
 // databaseAdapter is the public database interface for the app.
