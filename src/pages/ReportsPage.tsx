@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BarChart3, PieChart, TrendingUp, Download, Calendar, Filter, ArrowUp, ArrowDown } from 'lucide-react'
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
@@ -20,12 +21,34 @@ export default function ReportsPage() {
   const rooms = useRoomStore((s) => s.rooms)
   const payments = usePaymentStore((s) => s.payments)
 
+  const [selectedDateRange, setSelectedDateRange] = useState<'Current month' | 'Previous month' | 'All time'>('Current month')
+  const [selectedReportType, setSelectedReportType] = useState<'All' | 'Guest' | 'Financial' | 'Occupancy' | 'Maintenance'>('All')
+
+  const dateRanges = ['Current month', 'Previous month', 'All time'] as const
+  const reportTypes = ['All', 'Guest', 'Financial', 'Occupancy', 'Maintenance'] as const
+
   const nowMonth = new Date().toISOString().slice(0, 7)
   const currentMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
   const previousMonthDate = new Date()
   previousMonthDate.setMonth(previousMonthDate.getMonth() - 1)
   const previousMonthKey = previousMonthDate.toISOString().slice(0, 7)
   const previousMonthLabel = previousMonthDate.toLocaleString('default', { month: 'long', year: 'numeric' })
+
+  const selectedMonthKey = selectedDateRange === 'Current month'
+    ? nowMonth
+    : selectedDateRange === 'Previous month'
+    ? previousMonthKey
+    : undefined
+
+  const selectedPeriodLabel = selectedDateRange === 'All time'
+    ? 'All time'
+    : selectedDateRange === 'Current month'
+    ? currentMonthLabel
+    : previousMonthLabel
+
+  const paymentsInRange = selectedMonthKey
+    ? payments.filter((payment) => payment.date?.slice(0, 7) === selectedMonthKey)
+    : payments
 
   const monthlyIncomeReport = payments.reduce<Record<string, number>>((acc, payment) => {
     const month = payment.date?.slice(0, 7) || nowMonth
@@ -34,7 +57,7 @@ export default function ReportsPage() {
   }, {})
 
   const pendingDuesReport = boarders.map((b) => {
-    const paid = payments.filter((p) => p.boarderId === b.id).reduce((s, p) => s + p.amount, 0)
+    const paid = paymentsInRange.filter((p) => p.boarderId === b.id).reduce((s, p) => s + p.amount, 0)
     return { id: b.id, name: b.name, room: b.room, monthlyRent: b.monthlyRent, paid, due: Math.max(0, b.monthlyRent - paid) }
   })
 
@@ -45,7 +68,7 @@ export default function ReportsPage() {
       id: 'RPT-BOARDERS',
       name: 'Boarder Roster',
       type: 'Guest',
-      period: currentMonthLabel,
+      period: selectedPeriodLabel,
       status: boarders.length ? 'Completed' : 'Pending',
       generatedDate: boarders.length ? new Date().toISOString().slice(0, 10) : '',
       fileSize: `${Math.max(1, Math.round(boarders.length * 0.25))}.0 MB`,
@@ -54,32 +77,32 @@ export default function ReportsPage() {
       id: 'RPT-PAYMENTS',
       name: 'Payment Summary',
       type: 'Financial',
-      period: currentMonthLabel,
-      status: payments.length ? 'Completed' : 'Pending',
-      generatedDate: payments.length ? new Date().toISOString().slice(0, 10) : '',
-      fileSize: `${Math.max(1, Math.round(payments.length * 0.15))}.0 MB`,
+      period: selectedPeriodLabel,
+      status: paymentsInRange.length ? 'Completed' : 'Pending',
+      generatedDate: paymentsInRange.length ? new Date().toISOString().slice(0, 10) : '',
+      fileSize: `${Math.max(1, Math.round(paymentsInRange.length * 0.15))}.0 MB`,
     },
     {
       id: 'RPT-OCCUPANCY',
       name: 'Occupancy Overview',
       type: 'Occupancy',
-      period: currentMonthLabel,
+      period: selectedPeriodLabel,
       status: rooms.length ? 'Completed' : 'Pending',
       generatedDate: rooms.length ? new Date().toISOString().slice(0, 10) : '',
       fileSize: `${Math.max(1, Math.round(rooms.length * 0.2))}.0 MB`,
     },
   ]
 
+  const filteredReports = reports.filter((report) => selectedReportType === 'All' || report.type === selectedReportType)
+
   const totalBoarders = boarders.length
   const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
   const availableRooms = rooms.filter((room) => room.occupied < room.capacity).length
 
-  const monthlyIncome = payments
-    .filter((payment) => payment.date && payment.date.slice(0,7) === nowMonth)
-    .reduce((sum, payment) => sum + payment.amount, 0)
+  const monthlyIncome = paymentsInRange.reduce((sum, payment) => sum + payment.amount, 0)
 
   const boarderDues = boarders.map((boarder) => {
-    const paid = payments
+    const paid = paymentsInRange
       .filter((payment) => payment.boarderId === boarder.id)
       .reduce((sum, payment) => sum + payment.amount, 0)
     return Math.max(0, boarder.monthlyRent - paid)
@@ -97,7 +120,7 @@ export default function ReportsPage() {
   const keyMetrics = [
     { metric: 'Total Boarders', value: String(totalBoarders), trend: `${boardersWithDues} with dues` },
     { metric: 'Occupied Rooms', value: String(occupiedRooms), trend: `${availableRooms} available` },
-    { metric: 'Monthly Income', value: `$${monthlyIncome}`, trend: `${payments.filter((payment) => payment.date?.slice(0,7) === nowMonth).length} payments` },
+    { metric: 'Monthly Income', value: `$${monthlyIncome}`, trend: `${paymentsInRange.length} payments` },
     { metric: 'Pending Dues', value: `$${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
   ]
 
@@ -188,13 +211,19 @@ export default function ReportsPage() {
       {/* Filters */}
       <section className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-3">
-          <button className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
+          <button onClick={() => {
+              const index = dateRanges.indexOf(selectedDateRange)
+              setSelectedDateRange(dateRanges[(index + 1) % dateRanges.length])
+            }} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
             <Calendar className="h-5 w-5" />
-            Date Range
+            {selectedDateRange}
           </button>
-          <button onClick={() => showToast('Report type filtering is not available in preview')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
+          <button onClick={() => {
+              const index = reportTypes.indexOf(selectedReportType)
+              setSelectedReportType(reportTypes[(index + 1) % reportTypes.length])
+            }} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
             <Filter className="h-5 w-5" />
-            Report Type
+            {selectedReportType === 'All' ? 'Report Type' : selectedReportType}
           </button>
           <div className="flex-1" />
           <button onClick={() => showToast('Use the CSV export buttons for actual exports')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-medium text-slate-300 transition hover:bg-slate-800">
@@ -234,7 +263,7 @@ export default function ReportsPage() {
       <section className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
         <div className="mb-6 flex items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-white">Generated Reports</h2>
-          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">{reports.length} total</span>
+          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">{filteredReports.length} total</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -252,7 +281,7 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {reports.map((report) => (
+              {filteredReports.map((report) => (
                 <tr key={report.id} className="transition hover:bg-slate-800/40">
                   <td className="px-4 py-4">
                     <span className="font-mono text-sm font-semibold text-violet-400">{report.id}</span>
