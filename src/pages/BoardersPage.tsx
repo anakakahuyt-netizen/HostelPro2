@@ -57,6 +57,27 @@ export default function BoardersPage() {
 
   const rooms = useRoomStore((s) => s.rooms)
 
+  const occupiedBeds = rooms.reduce((sum, room) => sum + room.occupied, 0)
+  const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0)
+  const averageStayMonths = useMemo(() => {
+    const now = new Date()
+    const stays = boarders
+      .map((boarder) => {
+        if (!boarder.checkIn) return null
+        const start = new Date(boarder.checkIn)
+        const end = boarder.checkOut ? new Date(boarder.checkOut) : now
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+        return Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 30))
+      })
+      .filter((value): value is number => value !== null)
+    if (!stays.length) return 0
+    return stays.reduce((sum, m) => sum + m, 0) / stays.length
+  }, [boarders])
+  const boarderOccupancyRate = totalCapacity ? Math.round((occupiedBeds / totalCapacity) * 100) : 0
+  const averageStayLabel = `${averageStayMonths ? averageStayMonths.toFixed(1) : '0.0'} months`
+  const occupancyLabel = `${boarderOccupancyRate}%`
+  const occupiedRoomCount = rooms.filter((room) => room.occupied > 0).length
+
   const filtered = boarders.filter((b) => {
     if (roomFilter && b.room !== roomFilter) return false
     const q = query.toLowerCase()
@@ -250,14 +271,14 @@ export default function BoardersPage() {
       <section className="grid gap-6 xl:grid-cols-3">
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white">Average Stay Duration</h3>
-          <p className="mt-4 text-4xl font-bold text-indigo-400">8.2 months</p>
-          <p className="mt-2 text-sm text-slate-400">Based on 124 residents</p>
+          <p className="mt-4 text-4xl font-bold text-indigo-400">{averageStayLabel}</p>
+          <p className="mt-2 text-sm text-slate-400">Based on {boarders.length} boarders</p>
         </div>
 
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white">Occupancy Rate</h3>
-          <p className="mt-4 text-4xl font-bold text-emerald-400">94.2%</p>
-          <p className="mt-2 text-sm text-slate-400">118 of 125 rooms occupied</p>
+          <p className="mt-4 text-4xl font-bold text-emerald-400">{occupancyLabel}</p>
+          <p className="mt-2 text-sm text-slate-400">{occupiedRoomCount} of {rooms.length} rooms occupied</p>
         </div>
 
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">

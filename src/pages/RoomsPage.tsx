@@ -60,6 +60,24 @@ export default function RoomsPage() {
   const occupiedCount = roomsWithCounts.reduce((c, r) => c + (r.occupied > 0 ? 1 : 0), 0)
   const availableCount = roomsWithCounts.filter((r) => r.available > 0).length
   const maintenanceCount = roomsWithCounts.filter((r) => r.occupancyStatus === 'Maintenance').length
+  const typeCounts = rooms.reduce<Record<string, number>>((acc, room) => {
+    acc[room.type] = (acc[room.type] || 0) + 1
+    return acc
+  }, {})
+  const floorTotals = rooms.reduce<Record<string, { occupied: number; capacity: number }>>((acc, room) => {
+    const occupied = boarders.filter((b) => b.room === room.id || b.room === room.roomNumber).length
+    const key = `Floor ${room.floor}`
+    acc[key] = {
+      occupied: (acc[key]?.occupied || 0) + occupied,
+      capacity: (acc[key]?.capacity || 0) + room.capacity,
+    }
+    return acc
+  }, {})
+  const floorOccupancy = Object.fromEntries(
+    Object.entries(floorTotals).map(([floor, totals]) => [floor, totals.capacity ? (totals.occupied / totals.capacity) * 100 : 0])
+  )
+  const monthlyRevenue = rooms.reduce((sum, room) => sum + room.price * room.occupied, 0)
+  const averageRevenuePerRoom = occupiedCount ? monthlyRevenue / occupiedCount : 0
 
   return (
     <div className="space-y-8">
@@ -251,15 +269,10 @@ export default function RoomsPage() {
             <Building2 className="h-5 w-5 text-slate-400" />
           </div>
           <div className="space-y-3">
-            {[
-              { type: 'Single', count: 4 },
-              { type: 'Double', count: 12 },
-              { type: 'Triple', count: 10 },
-              { type: 'Quad', count: 6 },
-            ].map((item) => (
-              <div key={item.type} className="flex items-center justify-between text-sm">
-                <span className="text-slate-400">{item.type}</span>
-                <span className="font-semibold text-white">{item.count} rooms</span>
+            {Object.entries(typeCounts).map(([type, count]) => (
+              <div key={type} className="flex items-center justify-between text-sm">
+                <span className="text-slate-400">{type}</span>
+                <span className="font-semibold text-white">{count} rooms</span>
               </div>
             ))}
           </div>
@@ -271,20 +284,16 @@ export default function RoomsPage() {
             <TrendingUp className="h-5 w-5 text-slate-400" />
           </div>
           <div className="space-y-3">
-            {[
-              { floor: 'Ground', occupancy: 94 },
-              { floor: 'First', occupancy: 87 },
-              { floor: 'Second', occupancy: 83 },
-            ].map((item) => (
-              <div key={item.floor}>
+            {Object.entries(floorOccupancy).map(([floor, occupancy]) => (
+              <div key={floor}>
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="text-sm text-slate-400">{item.floor} Floor</span>
-                  <span className="text-sm font-semibold text-white">{item.occupancy}%</span>
+                  <span className="text-sm text-slate-400">{floor}</span>
+                  <span className="text-sm font-semibold text-white">{Math.round(occupancy)}%</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
                     className="h-2 rounded-full bg-linear-to-r from-sky-500 to-indigo-500"
-                    style={{ width: `${item.occupancy}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, occupancy))}%` }}
                   />
                 </div>
               </div>
@@ -294,11 +303,11 @@ export default function RoomsPage() {
 
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white mb-4">Monthly Revenue</h3>
-          <p className="text-4xl font-bold text-emerald-400">$11.2k</p>
-          <p className="mt-2 text-sm text-slate-400">From 28 occupied rooms</p>
+          <p className="text-4xl font-bold text-emerald-400">${monthlyRevenue.toLocaleString()}</p>
+          <p className="mt-2 text-sm text-slate-400">From {occupiedCount} occupied rooms</p>
           <div className="mt-4 pt-4 border-t border-slate-800/50">
-            <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Average per room</p>
-            <p className="mt-2 text-2xl font-semibold text-sky-400">$400</p>
+            <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Average per occupied room</p>
+            <p className="mt-2 text-2xl font-semibold text-sky-400">${averageRevenuePerRoom.toFixed(0)}</p>
           </div>
         </div>
       </section>

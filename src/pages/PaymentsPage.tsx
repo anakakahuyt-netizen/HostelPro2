@@ -40,13 +40,33 @@ export default function PaymentsPage() {
   const totalCollected = useMemo(() => payments.reduce((sum, p) => sum + p.amount, 0), [payments])
   const pendingAmount = useMemo(() => payments.filter((p) => p.status === 'Pending').reduce((s, p) => s + p.amount, 0), [payments])
   const overdueAmount = useMemo(() => payments.filter((p) => p.status === 'Overdue').reduce((s, p) => s + p.amount, 0), [payments])
-  const successRate = useMemo(() => (payments.length ? Math.round((payments.filter((p) => p.status === 'Paid').length / payments.length) * 100) : 0), [payments])
+  const paidCount = useMemo(() => payments.filter((p) => p.status === 'Paid').length, [payments])
+  const successRate = useMemo(() => (payments.length ? Math.round((paidCount / payments.length) * 100) : 0), [payments, paidCount])
+  const successChangeLabel = payments.length ? `${paidCount} paid` : 'No payments'
+  const paymentMethods = useMemo(() => {
+    const totals: Record<string, number> = {
+      'Card Payments': 0,
+      'Bank Transfer': 0,
+      Check: 0,
+    }
+    payments.forEach((payment) => {
+      if (payment.method === 'Card') totals['Card Payments'] += payment.amount
+      else if (payment.method === 'Transfer') totals['Bank Transfer'] += payment.amount
+      else if (payment.method === 'Check') totals['Check'] += payment.amount
+    })
+    const totalAmount = totals['Card Payments'] + totals['Bank Transfer'] + totals['Check']
+    return [
+      { method: 'Card Payments', amount: totals['Card Payments'], percentage: totalAmount ? Math.round((totals['Card Payments'] / totalAmount) * 100) : 0 },
+      { method: 'Bank Transfer', amount: totals['Bank Transfer'], percentage: totalAmount ? Math.round((totals['Bank Transfer'] / totalAmount) * 100) : 0 },
+      { method: 'Check', amount: totals['Check'], percentage: totalAmount ? Math.round((totals['Check'] / totalAmount) * 100) : 0 },
+    ]
+  }, [payments])
 
   const paymentStats = [
     { label: 'Total Collected', value: `$${totalCollected}`, change: '', icon: 'TrendingUp', accent: 'from-emerald-500 to-teal-500' },
     { label: 'Pending Payments', value: `$${pendingAmount}`, change: `${payments.filter((p) => p.status === 'Pending').length} invoices`, icon: 'AlertCircle', accent: 'from-amber-500 to-orange-500' },
     { label: 'Overdue', value: `$${overdueAmount}`, change: `${payments.filter((p) => p.status === 'Overdue').length} overdue`, icon: 'AlertCircle', accent: 'from-rose-500 to-pink-500' },
-    { label: 'Success Rate', value: `${successRate}%`, change: '+1.8%', icon: 'CheckCircle2', accent: 'from-blue-500 to-cyan-500' },
+    { label: 'Success Rate', value: `${successRate}%`, change: successChangeLabel, icon: 'CheckCircle2', accent: 'from-blue-500 to-cyan-500' },
   ]
 
   const dueMap = useMemo(() => {
@@ -274,15 +294,11 @@ export default function PaymentsPage() {
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white">Payment Methods</h3>
           <div className="mt-6 space-y-4">
-            {[
-              { method: 'Card Payments', amount: '$32.4k', percentage: 59 },
-              { method: 'Bank Transfer', amount: '$18.2k', percentage: 33 },
-              { method: 'Check', amount: '$4.2k', percentage: 8 },
-            ].map((item) => (
+            {paymentMethods.map((item) => (
               <div key={item.method}>
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <p className="text-sm font-medium text-slate-300">{item.method}</p>
-                  <span className="text-sm font-semibold text-white">{item.amount}</span>
+                  <span className="text-sm font-semibold text-white">${item.amount.toLocaleString()}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
