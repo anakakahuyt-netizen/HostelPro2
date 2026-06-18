@@ -1,17 +1,13 @@
-import { Building2, Search, Filter, Plus, Eye, Edit2, Trash2, Zap, Users, TrendingUp } from 'lucide-react'
+import { Building2, Search, Filter, Plus, Eye, Edit2, Trash2, TrendingUp } from 'lucide-react'
 import { useRoomStore } from '../store/roomStore'
 import { useBoarderStore } from '../store/boarderStore'
 import Modal from '../components/modals/Modal'
 import ConfirmModal from '../components/modals/ConfirmModal'
 import RoomForm from '../components/forms/RoomForm'
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { Room } from '../types'
 
-const iconMap = {
-  Building2,
-  Users,
-  Zap,
-  TrendingUp,
-}
 
 export default function RoomsPage() {
   const statusStyles: Record<string, string> = {
@@ -27,15 +23,17 @@ export default function RoomsPage() {
   const addRoom = useRoomStore((s) => s.addRoom)
   const updateRoom = useRoomStore((s) => s.updateRoom)
   const removeRoom = useRoomStore((s) => s.removeRoom)
+  const updateBoarder = useBoarderStore((s) => s.updateBoarder)
   const boarders = useBoarderStore((s) => s.boarders)
 
   const [openAdd, setOpenAdd] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [viewing, setViewing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [deleteWarning, setDeleteWarning] = useState<string | null>(null)
+  const [roomDeleteTarget, setRoomDeleteTarget] = useState<Room | null>(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const roomsGridRef = useMemo(() => ({ current: null as HTMLDivElement | null }), []) as any
 
   const roomsWithCounts = useMemo(() => rooms
     .map((r) => {
@@ -56,6 +54,7 @@ export default function RoomsPage() {
     ),
   [rooms, boarders, query, statusFilter])
 
+  const navigate = useNavigate()
   const total = roomsWithCounts.length
   const occupiedCount = roomsWithCounts.reduce((c, r) => c + (r.occupied > 0 ? 1 : 0), 0)
   const availableCount = roomsWithCounts.filter((r) => r.available > 0).length
@@ -98,16 +97,33 @@ export default function RoomsPage() {
         {/* Stats grid */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            { label: 'Total Rooms', value: String(total), change: 'All active', icon: 'Building2', accent: 'from-sky-500 to-indigo-500' },
-            { label: 'Occupied', value: String(occupiedCount), change: `${Math.round((occupiedCount / Math.max(total, 1)) * 100)}%`, icon: 'Users', accent: 'from-emerald-500 to-teal-500' },
-            { label: 'Available', value: String(availableCount), change: 'Ready', icon: 'Building2', accent: 'from-amber-500 to-orange-500' },
-            { label: 'Maintenance', value: String(maintenanceCount), change: 'Check', icon: 'Zap', accent: 'from-violet-500 to-fuchsia-500' },
+            { label: 'Total Rooms', value: String(total), change: 'All active', key: 'total' },
+            { label: 'Occupied', value: String(occupiedCount), change: `${Math.round((occupiedCount / Math.max(total, 1)) * 100)}%`, key: 'occupied' },
+            { label: 'Available', value: String(availableCount), change: 'Ready', key: 'available' },
+            { label: 'Maintenance', value: String(maintenanceCount), change: 'Check', key: 'maintenance' },
           ].map((stat) => {
-            const Icon = iconMap[stat.icon as keyof typeof iconMap]
+            const onClick = () => {
+              if (stat.key === 'total') {
+                setStatusFilter('')
+                roomsGridRef.current?.scrollIntoView({ behavior: 'smooth' })
+              } else if (stat.key === 'occupied') {
+                setStatusFilter('')
+                const el = roomsGridRef.current?.querySelector('[data-occupied="true"]')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              } else if (stat.key === 'available') {
+                setStatusFilter('')
+                const el = roomsGridRef.current?.querySelector('[data-available="true"]')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              } else if (stat.key === 'maintenance') {
+                setStatusFilter('Maintenance')
+                const el = roomsGridRef.current?.querySelector('[data-status="Maintenance"]')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }
+            }
             return (
-              <div key={stat.label} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 shadow-lg shadow-slate-950/20">
-                <div className={`inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-linear-to-br ${stat.accent} text-white shadow-lg shadow-slate-950/30`}>
-                  <Icon className="h-5 w-5" />
+              <button key={stat.label} onClick={onClick} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 text-left shadow-lg shadow-slate-950/20">
+                <div className={`inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-linear-to-br from-sky-500 to-indigo-500 text-white shadow-lg shadow-slate-950/30`}>
+                  <Building2 className="h-5 w-5" />
                 </div>
                 <p className="mt-5 text-sm uppercase tracking-[0.32em] text-slate-500">{stat.label}</p>
                 <div className="mt-3 flex items-end justify-between gap-4">
@@ -116,7 +132,7 @@ export default function RoomsPage() {
                     {stat.change}
                   </span>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -150,9 +166,9 @@ export default function RoomsPage() {
       </section>
 
       {/* Rooms grid */}
-      <section className="grid gap-6 lg:grid-cols-2">
+      <section className="grid gap-6 lg:grid-cols-2" ref={(el) => { roomsGridRef.current = el }}>
         {roomsWithCounts.map((room) => (
-          <div key={room.id} className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+          <div key={room.id} data-status={room.occupancyStatus} data-occupied={room.occupied>0} data-available={room.available>0} className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
             <div className="flex items-start justify-between gap-4 mb-6">
               <div>
                 <p className="text-xs uppercase tracking-[0.28em] text-slate-500">{room.id}</p>
@@ -186,7 +202,7 @@ export default function RoomsPage() {
             <div className="grid grid-cols-2 gap-3 mb-6">
               <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
                 <p className="text-xs text-slate-500">Monthly Rate</p>
-                <p className="mt-1 text-lg font-semibold text-emerald-400">${room.price}</p>
+                <p className="mt-1 text-lg font-semibold text-emerald-400">৳{room.price}</p>
               </div>
               <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
                 <p className="text-xs text-slate-500">Capacity</p>
@@ -213,9 +229,9 @@ export default function RoomsPage() {
                 <Edit2 className="h-4 w-4" />
               </button>
               <button onClick={() => {
-                const count = boarders.filter((b) => b.room === room.id || b.room === room.roomNumber).length
-                if (count > 0) {
-                  setDeleteWarning(`Cannot delete ${room.name}. It has ${count} boarder(s) assigned. Remove them first.`)
+                const roomBoarders = boarders.filter((b) => b.room === room.id || b.room === room.roomNumber)
+                if (roomBoarders.length > 0) {
+                  setRoomDeleteTarget(room)
                 } else {
                   setConfirmDelete(room.id)
                 }
@@ -251,15 +267,70 @@ export default function RoomsPage() {
               <p><strong>Capacity:</strong> {room.capacity}</p>
               <p><strong>Occupied beds:</strong> {room.occupied}</p>
               <p><strong>Available beds:</strong> {room.available}</p>
-              <p><strong>Monthly rent:</strong> ${room.price}</p>
+              <p><strong>Monthly rent:</strong> ৳{room.price}</p>
               <p><strong>Status:</strong> {room.occupancyStatus}</p>
             </div>
           ) : null
         })()}
       </Modal>
 
+      <Modal open={!!roomDeleteTarget} onClose={() => setRoomDeleteTarget(null)}>
+        <h3 className="text-lg font-semibold text-white">Room delete options</h3>
+        {roomDeleteTarget && (
+          <div className="mt-4 space-y-4 text-sm text-slate-200">
+            <p>
+              {roomDeleteTarget.name} has {boarders.filter((b) => b.room === roomDeleteTarget.id || b.room === roomDeleteTarget.roomNumber).length} assigned boarder(s).
+              You must move or checkout those boarders before deleting the room.
+            </p>
+            <div className="grid gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  boarders
+                    .filter((b) => b.room === roomDeleteTarget.id || b.room === roomDeleteTarget.roomNumber)
+                    .forEach((boarder) => {
+                      const checkOutDate = boarder.checkOut || new Date().toISOString().slice(0, 10)
+                      updateBoarder(boarder.id, { status: 'CHECKED_OUT', checkOut: checkOutDate })
+                    })
+                  removeRoom(roomDeleteTarget.id)
+                  setRoomDeleteTarget(null)
+                }}
+                className="rounded-2xl bg-amber-500 px-4 py-3 text-left text-sm font-semibold text-slate-950 transition hover:bg-amber-400"
+              >
+                Check out all boarders and delete room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  boarders
+                    .filter((b) => b.room === roomDeleteTarget.id || b.room === roomDeleteTarget.roomNumber)
+                    .forEach((boarder) => {
+                      const checkOutDate = boarder.checkOut || new Date().toISOString().slice(0, 10)
+                      updateBoarder(boarder.id, { status: 'CLOSED', checkOut: checkOutDate })
+                    })
+                  removeRoom(roomDeleteTarget.id)
+                  setRoomDeleteTarget(null)
+                }}
+                className="rounded-2xl bg-rose-500 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-rose-400"
+              >
+                Archive all boarders and delete room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRoomDeleteTarget(null)
+                  navigate('/boarders', { state: { section: 'active' } })
+                }}
+                className="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+              >
+                Move boarders manually in Boarders
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <ConfirmModal open={!!confirmDelete} title="Delete room" message={confirmDelete || ''} onConfirm={() => { if (confirmDelete) { removeRoom(confirmDelete); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
-      <ConfirmModal open={!!deleteWarning} title="Cannot delete room" message="This room contains active boarders and cannot be deleted." onConfirm={() => { setDeleteWarning(null) }} onCancel={() => setDeleteWarning(null)} />
 
       {/* Room statistics */}
       <section className="grid gap-6 xl:grid-cols-3">
@@ -303,11 +374,11 @@ export default function RoomsPage() {
 
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white mb-4">Monthly Revenue</h3>
-          <p className="text-4xl font-bold text-emerald-400">${monthlyRevenue.toLocaleString()}</p>
+          <p className="text-4xl font-bold text-emerald-400">৳{monthlyRevenue.toLocaleString()}</p>
           <p className="mt-2 text-sm text-slate-400">From {occupiedCount} occupied rooms</p>
           <div className="mt-4 pt-4 border-t border-slate-800/50">
             <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Average per occupied room</p>
-            <p className="mt-2 text-2xl font-semibold text-sky-400">${averageRevenuePerRoom.toFixed(0)}</p>
+            <p className="mt-2 text-2xl font-semibold text-sky-400">৳{averageRevenuePerRoom.toFixed(0)}</p>
           </div>
         </div>
       </section>

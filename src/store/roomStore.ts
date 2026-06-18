@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Room } from '../types'
 import * as databaseAdapter from '../services/database/databaseAdapter'
+import * as storageService from '../services/storageService'
 import { showToast } from '../services/toast'
 
 // This store now uses databaseAdapter, which currently forwards to the API layer.
@@ -13,7 +14,17 @@ interface RoomState {
 }
 
 export const useRoomStore = create<RoomState>((set, get) => {
-  const rooms = databaseAdapter.getRooms()
+  // Migration: check localStorage first, then SQLite
+  let rooms = databaseAdapter.getRooms()
+  if (rooms.length === 0) {
+    // If SQLite is empty, try to load from localStorage (migration path)
+    const storageRooms = storageService.getRooms()
+    if (storageRooms && storageRooms.length > 0) {
+      console.log('[roomStore] migrating', storageRooms.length, 'rooms from localStorage to SQLite')
+      databaseAdapter.saveRooms(storageRooms)
+      rooms = storageRooms
+    }
+  }
   return {
     rooms,
     addRoom: (r) => {
@@ -37,7 +48,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     },
     removeRoom: (id) => {
       set((s) => {
-        const next = s.rooms.filter((r) => r.id !== id)
+        const next = s.rooms.filter((r) => r.id !== id && r.roomNumber !== id)
         databaseAdapter.saveRooms(next)
         return { rooms: next }
       })

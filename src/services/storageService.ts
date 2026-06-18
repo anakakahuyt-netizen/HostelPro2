@@ -7,9 +7,25 @@ const PAYMENT_KEY = 'hostelpro_payments'
 export function getBoarders(): Boarder[] {
   try {
     const raw = localStorage.getItem(BOARDER_KEY)
-    return raw ? JSON.parse(raw) : []
+    const parsed = raw ? JSON.parse(raw) : []
+    // Instrumentation: log retrieval for debugging hydration issues
+    try {
+      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+      console.debug('[storageService] getBoarders ->', {
+        key: BOARDER_KEY,
+        rawLength: raw?.length ?? 0,
+        rawPreview: raw?.slice(0, 300),
+        parsedType: Array.isArray(parsed) ? 'array' : typeof parsed,
+        parsedCount: Array.isArray(parsed) ? parsed.length : undefined,
+        sample: Array.isArray(parsed) ? parsed.slice(0, 3) : parsed,
+        localStorageKeys: keys,
+      })
+    } catch (e) {
+      // ignore logging errors
+    }
+    return parsed
   } catch (err) {
-    console.error('getBoarders error', err)
+    console.error('[storageService] getBoarders error', err)
     return []
   }
 }

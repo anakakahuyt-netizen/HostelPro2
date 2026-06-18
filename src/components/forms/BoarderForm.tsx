@@ -1,6 +1,7 @@
 import React from 'react'
 import type { Boarder } from '../../types'
 import { useRoomStore } from '../../store/roomStore'
+import { normalizeBoarderStatus } from '../../utils/boarderLedger'
 
 export default function BoarderForm({ initial, onSubmit }: { initial?: Partial<Boarder>; onSubmit: (b: Boarder) => void }) {
   const rooms = useRoomStore((s) => s.rooms)
@@ -17,10 +18,11 @@ export default function BoarderForm({ initial, onSubmit }: { initial?: Partial<B
       email: state.email || '',
       phone: state.phone || '',
       room: state.room || '',
-      monthlyRent: Number(state.monthlyRent || 0),
-      status: (state.status as Boarder['status']) || 'Active',
+      status: normalizeBoarderStatus(state.status as string) || 'ACTIVE',
       checkIn: state.checkIn || '',
       checkOut: state.checkOut || '',
+      roomHistory: (state.roomHistory as string[]) || initial?.roomHistory || [],
+      archived: state.archived ?? initial?.archived,
     }
     onSubmit(boarder)
   }
@@ -33,14 +35,14 @@ export default function BoarderForm({ initial, onSubmit }: { initial?: Partial<B
       <select className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" value={state.room || ''} onChange={(e) => handle('room', e.target.value)}>
         <option value="">Unassigned</option>
         {rooms.map((r) => (
-          <option key={r.id} value={r.id}>{r.name} — {r.roomNumber}</option>
+          <option key={r.id} value={r.id}>{r.roomNumber}</option>
         ))}
       </select>
-      <input className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" placeholder="Monthly Rent" type="number" value={state.monthlyRent || ''} onChange={(e) => handle('monthlyRent', Number(e.target.value))} />
-      <select className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" value={(state.status as string) || 'Active'} onChange={(e) => handle('status', e.target.value)}>
-        <option>Active</option>
-        <option>Pending</option>
-        <option>Checked-out</option>
+      <select className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" value={(state.status as string) || 'ACTIVE'} onChange={(e) => handle('status', e.target.value)}>
+        <option value="ACTIVE">Active</option>
+        <option value="BOOKED">Booked</option>
+        <option value="CHECKED_OUT">Checked-out</option>
+        <option value="CLOSED">Closed</option>
       </select>
       <input className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" type="date" value={state.checkIn || ''} onChange={(e) => handle('checkIn', e.target.value)} />
       <input className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" type="date" value={state.checkOut || ''} onChange={(e) => handle('checkOut', e.target.value)} />

@@ -1,5 +1,6 @@
 import { Bell, Palette, Lock, Eye, EyeOff, Save, X, Download, Upload } from 'lucide-react'
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { exportBackup, importBackup } from '../services/backup'
 import { showToast } from '../services/toast'
 
@@ -7,7 +8,7 @@ export default function SettingsPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [theme, setTheme] = useState('Dark')
   const [dateFormat, setDateFormat] = useState('MM/DD/YYYY')
-  const [currency, setCurrency] = useState('USD ($)')
+  const [currency, setCurrency] = useState(() => localStorage.getItem('hostelpro.currency') || 'BDT')
   const [language, setLanguage] = useState('English')
   const [notificationSettings, setNotificationSettings] = useState<Record<string, boolean>>({
     'Payment Reminders': true,
@@ -18,6 +19,21 @@ export default function SettingsPage() {
     'System Alerts': true,
   })
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const themeRef = useRef<HTMLDivElement | null>(null)
+  const currencyRef = useRef<HTMLDivElement | null>(null)
+  const dateFormatRef = useRef<HTMLDivElement | null>(null)
+  const backupRef = useRef<HTMLDivElement | null>(null)
+  const location = useLocation()
+
+  useEffect(() => {
+    const state = location.state as any
+    if (!state) return
+    const section = state.section
+    if (section === 'theme') themeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (section === 'currency') currencyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (section === 'dateFormat') dateFormatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (section === 'backup') backupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [location.state])
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -83,7 +99,7 @@ export default function SettingsPage() {
 
       {/* Account Settings */}
       <section className="max-w-4xl space-y-6">
-        <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-8 shadow-lg shadow-slate-950/20">
+        <div ref={themeRef} className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-8 shadow-lg shadow-slate-950/20">
           <div className="mb-8 flex items-center gap-4 border-b border-slate-800/50 pb-6">
             <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-linear-to-br from-indigo-500 to-sky-500 text-2xl font-bold text-white">
               AP
@@ -224,7 +240,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div>
+            <div ref={dateFormatRef}>
               <label className="block text-sm uppercase tracking-[0.28em] text-slate-500 mb-3">Date Format</label>
               <select value={dateFormat} onChange={(e) => handleSettingChange(setDateFormat, e.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
                 <option>MM/DD/YYYY</option>
@@ -233,13 +249,14 @@ export default function SettingsPage() {
               </select>
             </div>
 
-            <div>
+            <div ref={currencyRef}>
               <label className="block text-sm uppercase tracking-[0.28em] text-slate-500 mb-3">Currency</label>
-              <select value={currency} onChange={(e) => handleSettingChange(setCurrency, e.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
-                <option>USD ($)</option>
-                <option>EUR (€)</option>
-                <option>GBP (£)</option>
-                <option>INR (₹)</option>
+              <select value={currency} onChange={(e) => { handleSettingChange(setCurrency, e.target.value); localStorage.setItem('hostelpro.currency', e.target.value) }} className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white transition focus:border-sky-500 focus:outline-none">
+                <option value="BDT">BDT (৳)</option>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="INR">INR (₹)</option>
               </select>
             </div>
 
@@ -292,7 +309,7 @@ export default function SettingsPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center justify-between gap-4">
-          <div className="flex gap-3">
+          <div ref={backupRef} className="flex gap-3">
             <button type="button" onClick={handleCancel} className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-6 py-3 font-semibold text-slate-300 transition hover:bg-slate-800">
               <X className="h-5 w-5" />
               Cancel

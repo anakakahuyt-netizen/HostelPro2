@@ -1,4 +1,6 @@
-export type BoarderStatus = 'Active' | 'Pending' | 'Checked-out'
+export type BoarderStatus = 'ACTIVE' | 'BOOKED' | 'CHECKED_OUT' | 'CLOSED'
+
+export type BoarderRoomHistoryEntry = { roomNumber: string; price: number } | string
 
 export interface Boarder {
   id: string
@@ -6,10 +8,11 @@ export interface Boarder {
   email: string
   phone: string
   room: string
-  monthlyRent: number
   status: BoarderStatus
   checkIn: string
   checkOut: string
+  roomHistory?: BoarderRoomHistoryEntry[]
+  archived?: boolean
 }
 
 export type RoomStatus = 'Available' | 'Occupied' | 'Limited' | 'Maintenance'
@@ -27,7 +30,7 @@ export interface Room {
   amenities: string[]
 }
 
-export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial' | 'Due'
+export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial' | 'Due' | 'Advance'
 
 export interface Payment {
   id: string

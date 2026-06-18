@@ -4,7 +4,9 @@ import { getPreloadPath, getIndexHtmlPath } from '../utils/paths.js'
 import { isDev } from '../utils/isDev.js'
 import type { BrowserWindowConstructorOptions } from 'electron'
 
-const baseDir = path.dirname(fileURLToPath(import.meta.url))
+// baseDir should be the electron/ directory, not config/
+// import.meta.url points to config/windowConfig.ts, so go up one level
+const baseDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
 export const windowOptions: BrowserWindowConstructorOptions = {
   width: 1200,

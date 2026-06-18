@@ -5,10 +5,11 @@ export interface Boarder {
     email: string;
     phone: string;
     room: string;
-    monthlyRent: number;
     status: BoarderStatus;
     checkIn: string;
     checkOut: string;
+    roomHistory?: string[];
+    archived?: boolean;
 }
 export type RoomStatus = 'Available' | 'Occupied' | 'Limited' | 'Maintenance';
 export interface Room {

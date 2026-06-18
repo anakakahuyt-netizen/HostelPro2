@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.app.json && tsc -p tsconfig.electron.json && vite build",
+    "build": "tsc -p tsconfig.app.json && tsc -p tsconfig.electron.json && vite build && node scripts/fix-preload.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "node scripts/electron-dev.mjs",

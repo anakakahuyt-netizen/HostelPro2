@@ -1,8 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Search, Filter, Download, Plus, Eye, Edit2, Trash2, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { usePaymentStore } from '../store/paymentStore'
 import { useBoarderStore } from '../store/boarderStore'
+import { useRoomStore } from '../store/roomStore'
 import type { Payment } from '../types'
+import { getBoarderRoomInfo, getBoarderTotals, isArchivedBoarder, normalizeBoarderStatus } from '../utils/boarderLedger'
+import formatCurrency from '../utils/formatCurrency'
 import Modal from '../components/modals/Modal'
 import ConfirmModal from '../components/modals/ConfirmModal'
 import PaymentForm from '../components/forms/PaymentForm'
@@ -27,8 +31,10 @@ export default function PaymentsPage() {
   const updatePayment = usePaymentStore((s) => s.updatePayment)
   const removePayment = usePaymentStore((s) => s.removePayment)
   const boarders = useBoarderStore((s) => s.boarders)
+  const rooms = useRoomStore((s) => s.rooms)
 
   const [searchQuery, setSearchQuery] = useState('')
+  const location = useLocation()
   const [filterBoarder, setFilterBoarder] = useState('')
   const [filterMonth, setFilterMonth] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -36,13 +42,53 @@ export default function PaymentsPage() {
   const [viewingPayment, setViewingPayment] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [preselectedBoarder, setPreselectedBoarder] = useState<string | null>(null)
+
+  const dueMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    boarders.forEach((boarder) => {
+      const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+      const roomPrice = room?.price || 0
+      const paid = payments.filter((p) => p.boarderId === boarder.id).reduce((s, p) => s + p.amount, 0)
+      map[boarder.id] = Math.max(0, roomPrice - paid)
+    })
+    return map
+  }, [boarders, rooms, payments])
 
   const totalCollected = useMemo(() => payments.reduce((sum, p) => sum + p.amount, 0), [payments])
-  const pendingAmount = useMemo(() => payments.filter((p) => p.status === 'Pending').reduce((s, p) => s + p.amount, 0), [payments])
-  const overdueAmount = useMemo(() => payments.filter((p) => p.status === 'Overdue').reduce((s, p) => s + p.amount, 0), [payments])
-  const paidCount = useMemo(() => payments.filter((p) => p.status === 'Paid').length, [payments])
+  const totalPendingDues = useMemo(() => Object.values(dueMap).reduce((s, v) => s + v, 0), [dueMap])
+  const pendingCount = useMemo(() => Object.values(dueMap).filter((v) => v > 0).length, [dueMap])
+
+  // Boarder/room resolution now handled in aggregated records/modals
+
+  const computePaymentStatus = (payment: Payment) => {
+    const boarder = boarders.find((b) => b.id === payment.boarderId)
+    const room = rooms.find((r) => r.id === boarder?.room || r.roomNumber === boarder?.room)
+    const roomPrice = room?.price || 0
+    const amount = Number(payment.amount || 0)
+    if (amount === 0) return 'Due'
+    if (roomPrice === 0) return 'Paid'
+    if (amount >= roomPrice) return 'Paid'
+    return 'Partial'
+  }
+
+  const paidCount = useMemo(() => payments.filter((p) => computePaymentStatus(p) === 'Paid').length, [payments, boarders, rooms])
   const successRate = useMemo(() => (payments.length ? Math.round((paidCount / payments.length) * 100) : 0), [payments, paidCount])
   const successChangeLabel = payments.length ? `${paidCount} paid` : 'No payments'
+
+  const overdueAmount = useMemo(() => {
+    const now = new Date()
+    return payments
+      .filter((p) => {
+        const status = computePaymentStatus(p)
+        if (status !== 'Due') return false
+        if (!p.dueDate) return true
+        const due = new Date(p.dueDate)
+        return due < now
+      })
+      .reduce((s, p) => s + p.amount, 0)
+  }, [payments, boarders, rooms])
+
   const paymentMethods = useMemo(() => {
     const totals: Record<string, number> = {
       'Card Payments': 0,
@@ -62,38 +108,71 @@ export default function PaymentsPage() {
     ]
   }, [payments])
 
+  useEffect(() => {
+    const status = (location.state as { status?: string })?.status
+    if (status === 'Due') {
+      setFilterStatus('Due')
+    }
+  }, [location.state])
+
+  useEffect(() => {
+    const state = location.state as any
+    if (state?.paymentId) {
+      setViewingPayment(state.paymentId)
+    }
+    if (state?.month) {
+      setFilterMonth(state.month)
+    }
+  }, [location.state])
+
   const paymentStats = [
-    { label: 'Total Collected', value: `$${totalCollected}`, change: '', icon: 'TrendingUp', accent: 'from-emerald-500 to-teal-500' },
-    { label: 'Pending Payments', value: `$${pendingAmount}`, change: `${payments.filter((p) => p.status === 'Pending').length} invoices`, icon: 'AlertCircle', accent: 'from-amber-500 to-orange-500' },
-    { label: 'Overdue', value: `$${overdueAmount}`, change: `${payments.filter((p) => p.status === 'Overdue').length} overdue`, icon: 'AlertCircle', accent: 'from-rose-500 to-pink-500' },
+    { label: 'Total Collected', value: formatCurrency(totalCollected), change: '', icon: 'TrendingUp', accent: 'from-emerald-500 to-teal-500' },
+    { label: 'Pending Dues', value: formatCurrency(totalPendingDues), change: `${pendingCount} owed`, icon: 'AlertCircle', accent: 'from-amber-500 to-orange-500' },
+    { label: 'Overdue', value: formatCurrency(overdueAmount), change: `${payments.filter((p) => computePaymentStatus(p) === 'Due' && (!p.dueDate || new Date(p.dueDate) < new Date())).length} overdue`, icon: 'AlertCircle', accent: 'from-rose-500 to-pink-500' },
     { label: 'Success Rate', value: `${successRate}%`, change: successChangeLabel, icon: 'CheckCircle2', accent: 'from-blue-500 to-cyan-500' },
   ]
 
-  const dueMap = useMemo(() => {
-    const map: Record<string, number> = {}
-    boarders.forEach((boarder) => {
-      const paid = payments.filter((p) => p.boarderId === boarder.id && p.status === 'Paid').reduce((s, p) => s + p.amount, 0)
-      map[boarder.id] = Math.max(0, boarder.monthlyRent - paid)
+
+  const paymentRecords = useMemo(() => {
+    return payments
+      .map((payment) => {
+        const boarder = boarders.find((b) => b.id === payment.boarderId)
+        const room = rooms.find((r) => r.id === boarder?.room || r.roomNumber === boarder?.room)
+        const roomInfo = boarder ? getBoarderRoomInfo(boarder, rooms) : { roomNumber: payment.room, price: 0 }
+        const paymentsFor = boarder ? payments.filter((p) => p.boarderId === boarder.id) : [payment]
+        const { totalDue } = boarder ? getBoarderTotals(boarder, paymentsFor, room) : { totalDue: 0 }
+        const boarderStatus = boarder ? normalizeBoarderStatus(boarder.status) : 'ACTIVE'
+        const shouldInclude = !boarder || !isArchivedBoarder(boarder.status, totalDue)
+        return {
+          id: payment.id,
+          payment,
+          boarderName: boarder?.name || payment.guest,
+          roomNumber: roomInfo.roomNumber || payment.room,
+          status: payment.status,
+          boarderStatus,
+          totalDue,
+          amount: payment.amount,
+          method: payment.method,
+          date: payment.date,
+          dueDate: payment.dueDate,
+          boarderId: payment.boarderId,
+          shouldInclude,
+        }
+      })
+      .filter((rec) => rec.shouldInclude)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  }, [payments, boarders, rooms])
+
+  const filteredPayments = useMemo(() => {
+    return paymentRecords.filter((rec) => {
+      const q = searchQuery.toLowerCase()
+      if (searchQuery && !(`${rec.boarderName}`.toLowerCase().includes(q) || rec.roomNumber.toLowerCase().includes(q) || rec.id.toLowerCase().includes(q))) return false
+      if (filterBoarder && rec.boarderId !== filterBoarder) return false
+      if (filterMonth && !(rec.date?.slice(0, 7) === filterMonth)) return false
+      if (filterStatus && rec.status !== filterStatus) return false
+      return true
     })
-    return map
-  }, [boarders, payments])
-
-  const normalizeStatus = (status: string) => {
-    if (status === 'Paid') return 'Paid'
-    if (status === 'Partial') return 'Partial'
-    return 'Due'
-  }
-
-  const filtered = payments.filter((payment) => {
-    if (searchQuery && !payment.guest.toLowerCase().includes(searchQuery.toLowerCase())) return false
-    if (filterBoarder && payment.boarderId !== filterBoarder) return false
-    if (filterMonth) {
-      const month = payment.date.slice(0, 7)
-      if (month !== filterMonth) return false
-    }
-    if (filterStatus && normalizeStatus(payment.status) !== filterStatus) return false
-    return true
-  })
+  }, [paymentRecords, searchQuery, filterBoarder, filterMonth, filterStatus])
 
   const currentPayment = payments.find((p) => p.id === editingPayment)
 
@@ -129,8 +208,12 @@ export default function PaymentsPage() {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {paymentStats.map((stat) => {
             const Icon = iconMap[stat.icon as keyof typeof iconMap]
+            const onClick = () => {
+              if (stat.label === 'Pending Dues' || stat.label === 'Overdue') setFilterStatus('Due')
+              else setFilterStatus('')
+            }
             return (
-              <div key={stat.label} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 shadow-lg shadow-slate-950/20">
+              <button key={stat.label} onClick={onClick} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 text-left shadow-lg shadow-slate-950/20">
                 <div className={`inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-linear-to-br ${stat.accent} text-white shadow-lg shadow-slate-950/30`}>
                   <Icon className="h-5 w-5" />
                 </div>
@@ -141,7 +224,7 @@ export default function PaymentsPage() {
                     {stat.change}
                   </span>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -187,9 +270,9 @@ export default function PaymentsPage() {
 
       {/* Payments table */}
       <section className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
-        <div className="mb-6 flex items-center justify-between gap-3">
+            <div className="mb-6 flex items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-white">Payment Records</h2>
-          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">{payments.length} total</span>
+          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">{boarders.length} boarders</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -207,36 +290,36 @@ export default function PaymentsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {filtered.map((payment) => (
-                <tr key={payment.id} className="transition hover:bg-slate-800/40">
+              {filteredPayments.map((rec) => (
+                <tr key={rec.id} className="transition hover:bg-slate-800/40">
                   <td className="px-4 py-4">
-                    <span className="font-mono text-sm font-semibold text-sky-400">{payment.id}</span>
+                    <span className="font-mono text-sm font-semibold text-sky-400">{rec.id}</span>
                   </td>
                   <td className="px-4 py-4">
-                    <p className="font-medium text-white">{payment.guest}</p>
+                    <p className="font-medium text-white">{rec.boarderName}</p>
                   </td>
                   <td className="px-4 py-4">
-                    <span className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-sm text-slate-300">{payment.room}</span>
+                    <span className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-sm text-slate-300">{rec.roomNumber}</span>
                   </td>
                   <td className="px-4 py-4">
-                    <p className="font-semibold text-emerald-400">${payment.amount}</p>
+                    <p className="font-semibold text-emerald-400">{formatCurrency(rec.amount)}</p>
                   </td>
-                  <td className="px-4 py-4 text-sm text-slate-400">{payment.dueDate}</td>
+                  <td className="px-4 py-4 text-sm text-slate-400">{rec.date ?? '-'}</td>
                   <td className="px-4 py-4">
-                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[payment.status]}`}>
-                      {payment.status}
+                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[rec.status as keyof typeof statusStyles]}`}>
+                      {rec.status}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-sm text-slate-400">{payment.method}</td>
+                  <td className="px-4 py-4 text-sm text-slate-400">{rec.method}</td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setViewingPayment(payment.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
+                      <button onClick={() => { setViewingPayment(rec.id); setShowModal(false) }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
                         <Eye className="h-4 w-4" />
                       </button>
-                      <button onClick={() => { setEditingPayment(payment.id); setShowModal(true) }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
+                      <button onClick={() => { setEditingPayment(rec.id); setPreselectedBoarder(rec.boarderId); setShowModal(true) }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
                         <Edit2 className="h-4 w-4" />
                       </button>
-                      <button onClick={() => setConfirmDelete(payment.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
+                      <button onClick={() => setConfirmDelete(rec.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
@@ -262,32 +345,110 @@ export default function PaymentsPage() {
         </div>
       </section>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditingPayment(null) }}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditingPayment(null); setPreselectedBoarder(null) }}>
         <h3 className="text-lg font-semibold text-white">{editingPayment ? 'Edit Payment' : 'New Payment'}</h3>
         <div className="mt-4">
-          <PaymentForm boarders={boarders} initial={currentPayment ?? undefined} onSubmit={handleSavePayment} />
+          <PaymentForm
+            boarders={boarders}
+            rooms={rooms}
+            payments={payments}
+            initial={currentPayment ?? (preselectedBoarder ? ({ boarderId: preselectedBoarder } as Partial<Payment>) : undefined)}
+            onSubmit={handleSavePayment}
+          />
         </div>
       </Modal>
       <Modal open={!!viewingPayment} onClose={() => setViewingPayment(null)}>
         <h3 className="text-lg font-semibold text-white">Payment Details</h3>
         {(() => {
+          if (!viewingPayment) return null
+          if (viewingPayment.startsWith('boarder:')) {
+            const id = viewingPayment.split(':')[1]
+            const boarder = boarders.find((b) => b.id === id)
+            if (!boarder) return null
+            const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+            const roomInfo = getBoarderRoomInfo(boarder, rooms)
+            const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+            const { totalPaid, totalDue, advance, ledger } = getBoarderTotals(boarder, paymentsFor, room)
+            return (
+              <div className="mt-4 space-y-3 text-sm text-slate-200">
+                <p><strong>Boarder name:</strong> {boarder.name}</p>
+                <p><strong>Room:</strong> {roomInfo.roomNumber || 'Unknown'}</p>
+                <p><strong>Room rent:</strong> {formatCurrency(roomInfo.price || 0)}</p>
+                <p><strong>Total paid:</strong> {formatCurrency(totalPaid)}</p>
+                <p><strong>Total due:</strong> {formatCurrency(totalDue)}</p>
+                <p><strong>Advance balance:</strong> {formatCurrency(advance)}</p>
+                <p><strong>Payment ledger:</strong></p>
+                <div className="space-y-2 text-slate-300">
+                  {ledger.length ? ledger.map((entry) => (
+                    <div key={entry.month} className="grid grid-cols-5 gap-2 text-xs border border-slate-800/60 rounded-2xl bg-slate-950/80 p-3">
+                      <span>{entry.month}</span>
+                      <span>Rent {formatCurrency(entry.rent)}</span>
+                      <span>Paid {formatCurrency(entry.paid)}</span>
+                      <span>Due {formatCurrency(entry.due)}</span>
+                      <span>Adv {formatCurrency(entry.advance)}</span>
+                    </div>
+                  )) : <div className="text-sm text-slate-400">No ledger entries yet</div>}
+                </div>
+              </div>
+            )
+          }
+
           const payment = payments.find((p) => p.id === viewingPayment)
           if (!payment) return null
+          const boarder = boarders.find((b) => b.id === payment.boarderId)
+          const room = rooms.find((r) => r.id === boarder?.room || r.roomNumber === boarder?.room)
+          const rent = room?.price || 0
+          const paymentsFor = payments.filter((p) => p.boarderId === boarder?.id)
+          const totalPaid = paymentsFor.reduce((s, p) => s + p.amount, 0)
+          const due = Math.max(0, rent - totalPaid)
+          const advance = Math.max(0, totalPaid - rent)
           return (
             <div className="mt-4 space-y-3 text-sm text-slate-200">
-              <p><strong>Boarder name:</strong> {payment.guest}</p>
-              <p><strong>Room:</strong> {payment.room}</p>
-              <p><strong>Payment amount:</strong> ${payment.amount}</p>
+              <p><strong>Boarder name:</strong> {boarder?.name || payment.guest || 'Unknown'}</p>
+              <p><strong>Room:</strong> {room?.roomNumber || payment.room || 'Unknown'}</p>
+              <p><strong>Payment amount:</strong> {formatCurrency(payment.amount)}</p>
               <p><strong>Payment date:</strong> {payment.date || 'N/A'}</p>
               <p><strong>Month:</strong> {(payment.date || payment.dueDate).slice(0, 7) || 'N/A'}</p>
               <p><strong>Payment method:</strong> {payment.method}</p>
               <p><strong>Notes:</strong> {payment.notes || 'None'}</p>
-              <p><strong>Remaining due:</strong> ${dueMap[payment.boarderId] ?? 0}</p>
+              <p><strong>Room rent:</strong> {formatCurrency(rent)}</p>
+              <p><strong>Total paid (all months):</strong> {formatCurrency(totalPaid)}</p>
+              <p><strong>Remaining due:</strong> {formatCurrency(due)}</p>
+              <p><strong>Advance balance:</strong> {formatCurrency(advance)}</p>
             </div>
           )
         })()}
       </Modal>
       <ConfirmModal open={!!confirmDelete} title="Delete payment" message="Are you sure you want to delete this payment?" onConfirm={() => { if (confirmDelete) { removePayment(confirmDelete); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
+
+      <section className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Recent Transactions</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">Latest payments</h2>
+          </div>
+          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">Newest first</span>
+        </div>
+        <div className="space-y-3">
+          {filteredPayments.slice(0, 5).map((rec) => (
+            <div key={rec.id} className="rounded-3xl border border-slate-800/80 bg-slate-950/90 p-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="font-semibold text-white">{rec.boarderName}</p>
+                <p className="text-sm text-slate-400">{rec.date || 'No date'}</p>
+              </div>
+              <div className="text-right">
+                <p className="font-semibold text-emerald-400">{formatCurrency(rec.amount)}</p>
+                <p className="text-sm text-slate-400">{rec.method}</p>
+              </div>
+            </div>
+          ))}
+          {!filteredPayments.length && (
+            <div className="rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-6 text-center text-slate-400">
+              No recent transactions match the current filters.
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Payment methods summary */}
       <section className="grid gap-6 xl:grid-cols-2">
@@ -298,7 +459,7 @@ export default function PaymentsPage() {
               <div key={item.method}>
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <p className="text-sm font-medium text-slate-300">{item.method}</p>
-                  <span className="text-sm font-semibold text-white">${item.amount.toLocaleString()}</span>
+                  <span className="text-sm font-semibold text-white">{formatCurrency(item.amount)}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
@@ -314,13 +475,13 @@ export default function PaymentsPage() {
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white">Recent Transactions</h3>
           <div className="mt-6 space-y-4">
-            {payments.slice(0, 4).map((payment) => (
-              <div key={payment.id} className="flex items-center justify-between rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+            {paymentRecords.slice(0, 4).map((rec) => (
+              <div key={rec.id} className="flex items-center justify-between rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
                 <div>
-                  <p className="font-medium text-white">{payment.guest}</p>
-                  <p className="text-sm text-slate-500">{payment.date || 'Pending'}</p>
+                  <p className="font-medium text-white">{rec.boarderName}</p>
+                  <p className="text-sm text-slate-500">{rec.date || 'Pending'}</p>
                 </div>
-                <p className="font-semibold text-emerald-400">${payment.amount}</p>
+                <p className="font-semibold text-emerald-400">{formatCurrency(rec.amount)}</p>
               </div>
             ))}
           </div>

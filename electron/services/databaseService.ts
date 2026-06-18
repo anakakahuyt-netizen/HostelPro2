@@ -67,6 +67,21 @@ export function initializeDatabase(): void {
   database.pragma('journal_mode = WAL')
   database.pragma('foreign_keys = ON')
   prepareSchema(database)
+  
+  // Log what's in the database after initialization
+  try {
+    const boarderCount = database.prepare('SELECT COUNT(*) as count FROM boarders').get() as { count: number }
+    const roomCount = database.prepare('SELECT COUNT(*) as count FROM rooms').get() as { count: number }
+    const paymentCount = database.prepare('SELECT COUNT(*) as count FROM payments').get() as { count: number }
+    console.log('[databaseService] database initialized at', dbPath)
+    console.log('[databaseService] boarders:', boarderCount.count, 'rooms:', roomCount.count, 'payments:', paymentCount.count)
+    if (boarderCount.count > 0) {
+      const samples = database.prepare('SELECT * FROM boarders LIMIT 2').all()
+      console.log('[databaseService] sample boarders:', samples)
+    }
+  } catch (err) {
+    console.log('[databaseService] logging error:', err)
+  }
 }
 
 export function openDatabase(): Database.Database | null {

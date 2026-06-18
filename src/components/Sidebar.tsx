@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import { Home, Users, Building2, CreditCard, BarChart3, Settings, Sparkles } from 'lucide-react'
 import { useUiStore } from '../store/uiStore'
+import { useBoarderStore } from '../store/boarderStore'
+import { useRoomStore } from '../store/roomStore'
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', icon: Home },
@@ -13,6 +15,9 @@ const navItems = [
 
 export default function Sidebar() {
   const { sidebarOpen, closeSidebar } = useUiStore()
+  const boarders = useBoarderStore((s) => s.boarders)
+  const rooms = useRoomStore((s) => s.rooms)
+  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
 
   return (
     <>
@@ -33,8 +38,8 @@ export default function Sidebar() {
 
         <div className="space-y-2 rounded-4xl border border-slate-800/70 bg-slate-900/80 p-4 shadow-inner shadow-slate-950/10">
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Live status</p>
-          <p className="mt-3 text-sm font-semibold text-white">23 boarders active</p>
-          <p className="text-sm text-slate-400">Rooms occupied: 12/14</p>
+          <p className="mt-3 text-sm font-semibold text-white">{boarders.length} boarders active</p>
+          <p className="text-sm text-slate-400">Rooms occupied: {occupiedRooms}/{rooms.length}</p>
         </div>
 
         <nav className="mt-10 flex-1 space-y-2">
