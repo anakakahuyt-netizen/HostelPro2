@@ -3,6 +3,8 @@ import { Home, Users, Building2, CreditCard, BarChart3, Settings, Sparkles } fro
 import { useUiStore } from '../store/uiStore'
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
+import { usePaymentStore } from '../store/paymentStore'
+import { isBoarderOccupyingBed } from '../utils/boarderLedger'
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', icon: Home },
@@ -17,7 +19,11 @@ export default function Sidebar() {
   const { sidebarOpen, closeSidebar } = useUiStore()
   const boarders = useBoarderStore((s) => s.boarders)
   const rooms = useRoomStore((s) => s.rooms)
-  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
+  const payments = usePaymentStore((s) => s.payments)
+  const occupiedRooms = rooms.filter((room) => boarders.some((boarder) => {
+    const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
+    return isBoarderOccupyingBed(boarder, paymentsFor, room)
+  })).length
 
   return (
     <>

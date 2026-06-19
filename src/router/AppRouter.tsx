@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import DashboardPage from '../pages/DashboardPage'
 import BoardersPage from '../pages/BoardersPage'
@@ -9,7 +9,7 @@ import SettingsPage from '../pages/SettingsPage'
 
 export default function AppRouter() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
@@ -22,6 +22,6 @@ export default function AppRouter() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }

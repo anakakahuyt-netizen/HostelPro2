@@ -1,9 +1,17 @@
-﻿import { BarChart3, CreditCard, Home, Users, Layers2, ArrowUpRight, Wallet, CalendarDays } from 'lucide-react'
+﻿/*
+ * ARCHITECTURE LOCK - HostelPro V1.2
+ * This file is part of the stable HostelPro V1.2 architecture.
+ * DO NOT MODIFY UI, business logic, CSV import rules, ledger calculations, or database shape.
+ * Allowed changes: non-functional comments, type declarations, and harmless documentation only.
+ */
+
+import { useMemo } from 'react'
+import { BarChart3, CreditCard, Home, Users, Layers2, ArrowUpRight, Wallet, CalendarDays } from 'lucide-react'
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
 import { useNavigate } from 'react-router-dom'
-import { getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus } from '../utils/boarderLedger'
+import { getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus, isBoarderOccupyingBed, getRoomOccupants } from '../utils/boarderLedger'
 
 const iconMap = {
   Users,
@@ -21,57 +29,96 @@ const DashboardPage = () => {
   const rooms = useRoomStore((s) => s.rooms)
   const payments = usePaymentStore((s) => s.payments)
 
+  // debug log removed
+
   const navigate = useNavigate()
   const totalRooms = rooms.length
-  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
-  const totalCapacity = rooms.reduce((s, r) => s + r.capacity, 0)
-  const totalOccupiedBeds = rooms.reduce((s, r) => s + r.occupied, 0)
-  const availableBeds = Math.max(0, totalCapacity - totalOccupiedBeds)
-  const occupancyRate = totalCapacity ? Math.round((totalOccupiedBeds / totalCapacity) * 100) : 0
 
-  const nowMonth = new Date().toISOString().slice(0, 7)
+  const derivedBoarderStatuses = useMemo(() => {
+    return boarders.map((b) => {
+      const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
+      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
+      const normalized = normalizeBoarderStatus(b.status)
+      const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(b, 0)
+      const { totalDue } = getBoarderTotals(b, paymentsFor, room, effectiveStatus)
+      return getDerivedBoarderStatus(b, totalDue)
+    })
+  }, [boarders, rooms, payments])
+
+  const occupiedRooms = rooms.filter((room) => {
+    const occupants = getRoomOccupants(room.id, boarders, payments, rooms)
+    return occupants.length > 0
+  }).length
+  const occupancyRate = totalRooms ? Math.round((occupiedRooms / totalRooms) * 100) : 0
+  const totalCapacity = rooms.reduce((s, r) => s + r.capacity, 0)
+  const totalOccupiedBeds = boarders.filter((boarder) => {
+    const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
+    return isBoarderOccupyingBed(boarder, paymentsFor)
+  }).length
+  const availableBeds = Math.max(0, totalCapacity - totalOccupiedBeds)
+
   const currentMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
 
-  const monthPayments = payments.filter((p) => p.date && p.date.slice(0, 7) === nowMonth)
-  const totalCollected = monthPayments.filter((p) => p.status === 'Paid' || p.status === 'Partial').reduce((s, p) => s + p.amount, 0)
-  const overduePayments = payments.filter((payment) => payment.status === 'Overdue').length
+  // Dashboard room cards - use getRoomOccupants for occupancy display
+  const dashboardRoomsWithOccupancy = useMemo(() => rooms.map((room) => {
+    const occupants = getRoomOccupants(room.id, boarders, payments, rooms)
+    return { ...room, occupied: occupants.length }
+  }), [rooms, boarders, payments])
 
-  const boarderDues = boarders.map((boarder) => {
+  // Monthly Revenue = sum of room prices of ACTIVE boarders
+  const monthlyRevenue = boarders.reduce((sum, boarder, index) => {
+    if (derivedBoarderStatuses[index] === 'ACTIVE') {
+      const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+      return sum + (room?.price || 0)
+    }
+    return sum
+  }, 0)
+
+  // Total Advance Balance = sum of all boarders' advance balances
+  const totalAdvanceBalance = boarders.reduce((sum, boarder) => {
     const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-    const roomPrice = room?.price || 0
-    const paidThisMonth = payments
-      .filter((p) => p.boarderId === boarder.id && p.date && p.date.slice(0, 7) === nowMonth)
-      .reduce((s, p) => s + p.amount, 0)
-    return Math.max(0, roomPrice - paidThisMonth)
-  })
-  const totalPendingDues = boarderDues.reduce((s, due) => s + due, 0)
-  const boardersWithDues = boarderDues.filter((due) => due > 0).length
+    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+    const normalized = normalizeBoarderStatus(boarder.status)
+    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
+    const { advance } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
+    return sum + advance
+  }, 0)
 
-  const activeBoarders = boarders.filter((b) => normalizeBoarderStatus(b.status) === 'ACTIVE').length
-  const bookedBoarders = boarders.filter((b) => normalizeBoarderStatus(b.status) === 'BOOKED').length
-  const checkedOutBoarders = boarders.filter((b) => {
-    const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
-    const paymentsFor = payments.filter((p) => p.boarderId === b.id)
-    const { totalDue } = getBoarderTotals(b, paymentsFor, room)
-    return getDerivedBoarderStatus(b, totalDue) === 'CHECKED_OUT'
-  }).length
+  const boarderDueEntries = boarders.map((boarder) => {
+    const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+    const normalized = normalizeBoarderStatus(boarder.status)
+    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
+    const { totalDue } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
+    const derived = getDerivedBoarderStatus(boarder, totalDue)
+    return { id: boarder.id, totalDue, derived }
+  })
+  const totalPendingDues = boarderDueEntries.reduce((s, e) => (e.derived === 'CLOSED' ? s : s + e.totalDue), 0)
+  const boardersWithDues = boarderDueEntries.filter((e) => e.derived !== 'CLOSED' && e.totalDue > 0).length
+
+  const activeBoarders = derivedBoarderStatuses.filter((status) => status === 'ACTIVE').length
+  const bookedBoarders = derivedBoarderStatuses.filter((status) => status === 'BOOKED').length
+  const checkedOutBoarders = derivedBoarderStatuses.filter((status) => status === 'CHECKED_OUT').length
+  const closedBoarders = derivedBoarderStatuses.filter((status) => status === 'CLOSED').length
 
   const metrics = [
-    { label: 'Total Boarders', value: String(boarders.length), change: `${occupiedRooms} occupied rooms`, icon: 'Users', accent: 'from-indigo-500 to-sky-500', path: '/boarders' },
+    { label: 'Total Boarders', value: String(boarders.length), change: `${activeBoarders} active`, icon: 'Users', accent: 'from-indigo-500 to-sky-500', path: '/boarders' },
     { label: 'Active', value: String(activeBoarders), change: `${bookedBoarders} booked`, icon: 'Users', accent: 'from-emerald-500 to-teal-500', path: '/boarders', state: { section: 'active' } },
     { label: 'Booked', value: String(bookedBoarders), change: `${checkedOutBoarders} checked out`, icon: 'Users', accent: 'from-cyan-500 to-blue-500', path: '/boarders', state: { section: 'booked' } },
-    { label: 'Checked-out', value: String(checkedOutBoarders), change: `${boarders.filter((b) => normalizeBoarderStatus(b.status) === 'CHECKED_OUT').length} total`, icon: 'Users', accent: 'from-orange-500 to-red-500', path: '/boarders', state: { section: 'checked-out' } },
+    { label: 'Checked-out', value: String(checkedOutBoarders), change: `${closedBoarders} archived`, icon: 'Users', accent: 'from-orange-500 to-red-500', path: '/boarders', state: { section: 'checked-out' } },
+    { label: 'Archived', value: String(closedBoarders), change: 'Closed', icon: 'Users', accent: 'from-slate-500 to-slate-400', path: '/boarders', state: { section: 'archived' } },
     { label: 'Total Rooms', value: String(totalRooms), change: `${availableBeds} beds available`, icon: 'Home', accent: 'from-emerald-500 to-teal-500', path: '/rooms' },
-    { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${occupancyRate}% occupancy`, icon: 'Home', accent: 'from-amber-500 to-orange-500', path: '/rooms', state: { section: 'occupied' } },
-    { label: 'Available Beds', value: String(availableBeds), change: `${totalCapacity} capacity`, icon: 'Home', accent: 'from-cyan-500 to-blue-500', path: '/rooms', state: { section: 'available' } },
-    { label: 'Monthly Income', value: `৳${totalCollected}`, change: `${monthPayments.length} payments this month`, icon: 'CreditCard', accent: 'from-orange-500 to-amber-500', path: '/payments', state: { month: nowMonth } },
-    { label: 'Pending Dues', value: `৳${totalPendingDues}`, change: `${boardersWithDues} boarders owed`, icon: 'Wallet', accent: 'from-cyan-500 to-blue-500', path: '/payments', state: { status: 'Due' } },
+    { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${occupancyRate}% occupancy`, icon: 'Home', accent: 'from-amber-500 to-orange-500', path: '/rooms' },
+    { label: 'Available Rooms', value: String(totalRooms - occupiedRooms), change: 'Ready', icon: 'Home', accent: 'from-cyan-500 to-blue-500', path: '/rooms' },
+    { label: 'Monthly Revenue', value: `৳${monthlyRevenue}`, change: `${activeBoarders} active boarders`, icon: 'CreditCard', accent: 'from-orange-500 to-amber-500', path: '/boarders' },
+    { label: 'Total Due', value: `৳${totalPendingDues}`, change: `${boardersWithDues} boarders owed`, icon: 'Wallet', accent: 'from-cyan-500 to-blue-500', path: '/boarders' },
+    { label: 'Advance Balance', value: `৳${totalAdvanceBalance}`, change: 'Prepayments', icon: 'CreditCard', accent: 'from-violet-500 to-indigo-500', path: '/payments' },
   ]
 
   const stats = [
-    { title: 'Occupancy Rate', value: `${occupancyRate}%`, trend: `${totalOccupiedBeds} of ${totalCapacity} beds` },
-    { title: 'Pending Dues', value: `৳${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
-    { title: 'Pending Dues', value: `৳${totalPendingDues}`, trend: `${overduePayments} overdue` },
+    { title: 'Occupancy Rate', value: `${occupancyRate}%`, trend: `${occupiedRooms} of ${totalRooms} rooms` },
+    { title: 'Total Due', value: `৳${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
+    { title: 'Monthly Revenue', value: `৳${monthlyRevenue}`, trend: `${activeBoarders} active` },
   ]
 
   return (
@@ -93,7 +140,7 @@ const DashboardPage = () => {
             </div>
             <div className="rounded-3xl bg-slate-900/90 px-4 py-3 text-slate-300 shadow-inner shadow-slate-950/10">
               <p className="text-xs uppercase tracking-[0.32em] text-slate-500">Active alerts</p>
-              <p className="mt-2 text-sm font-semibold text-emerald-400">{overduePayments > 0 ? `${overduePayments} overdue payments` : `${totalPendingDues} pending dues`}</p>
+              <p className="mt-2 text-sm font-semibold text-emerald-400">{boardersWithDues > 0 ? `${boardersWithDues} boarders with due` : 'All paid up'}</p>
             </div>
           </div>
         </div>
@@ -219,12 +266,12 @@ const DashboardPage = () => {
         <div className="mt-6 rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-slate-400">Occupied beds</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{totalOccupiedBeds}</p>
+              <p className="text-sm text-slate-400">Occupied rooms</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{occupiedRooms}</p>
             </div>
             <div>
-              <p className="text-sm text-slate-400">Total beds</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{totalCapacity}</p>
+              <p className="text-sm text-slate-400">Total rooms</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{totalRooms}</p>
             </div>
             <div>
               <p className="text-sm text-slate-400">Occupancy rate</p>
@@ -233,7 +280,7 @@ const DashboardPage = () => {
           </div>
         </div>
         <div className="mt-6 space-y-4">
-          {rooms.map((room) => (
+          {dashboardRoomsWithOccupancy.map((room) => (
             <div key={room.id} className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -277,10 +324,10 @@ const DashboardPage = () => {
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Total revenue</p>
-                <p className="mt-2 text-3xl font-semibold text-white">৳{totalCollected}</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Monthly Revenue</p>
+                <p className="mt-2 text-3xl font-semibold text-white">৳{monthlyRevenue}</p>
               </div>
-              <span className="rounded-3xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-300">{monthPayments.length} this month</span>
+              <span className="rounded-3xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-300">{activeBoarders} active</span>
             </div>
             <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
               <div className="h-3 w-full rounded-full bg-linear-to-r from-indigo-500 to-cyan-400" />
@@ -289,7 +336,7 @@ const DashboardPage = () => {
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Pending dues</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Total Due</p>
                 <p className="mt-2 text-2xl font-semibold text-white">৳{totalPendingDues}</p>
               </div>
               <span className="rounded-3xl bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-300">{boardersWithDues} boarders</span>
@@ -301,12 +348,12 @@ const DashboardPage = () => {
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Overdue dues</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{overduePayments}</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Advance Balance</p>
+                <p className="mt-2 text-2xl font-semibold text-white">৳{totalAdvanceBalance}</p>
               </div>
-              {CalendarDays ? <CalendarDays className="h-5 w-5 text-slate-400" /> : null}
+              {Wallet ? <Wallet className="h-5 w-5 text-slate-400" /> : null}
             </div>
-            <p className="mt-4 text-sm text-slate-400">{overduePayments > 0 ? `${overduePayments} overdue` : 'No overdue dues'}</p>
+            <p className="mt-4 text-sm text-slate-400">{totalAdvanceBalance > 0 ? `Prepayments on account` : 'No advance balance'}</p>
           </div>
         </div>
       </div>

@@ -5,7 +5,7 @@ import { usePaymentStore } from '../store/paymentStore'
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import type { Payment } from '../types'
-import { getBoarderRoomInfo, getBoarderTotals, isArchivedBoarder, normalizeBoarderStatus } from '../utils/boarderLedger'
+import { getBoarderRoomInfo, getBoarderTotals, isArchivedBoarder, normalizeBoarderStatus, getDerivedBoarderStatus } from '../utils/boarderLedger'
 import formatCurrency from '../utils/formatCurrency'
 import Modal from '../components/modals/Modal'
 import ConfirmModal from '../components/modals/ConfirmModal'
@@ -24,6 +24,7 @@ export default function PaymentsPage() {
     Overdue: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
     Partial: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
     Due: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+    Advance: 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30',
   }
  
   const payments = usePaymentStore((s) => s.payments)
@@ -48,9 +49,11 @@ export default function PaymentsPage() {
     const map: Record<string, number> = {}
     boarders.forEach((boarder) => {
       const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-      const roomPrice = room?.price || 0
-      const paid = payments.filter((p) => p.boarderId === boarder.id).reduce((s, p) => s + p.amount, 0)
-      map[boarder.id] = Math.max(0, roomPrice - paid)
+      const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+      const normalized = normalizeBoarderStatus(boarder.status)
+      const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
+      const { totalDue } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
+      map[boarder.id] = totalDue
     })
     return map
   }, [boarders, rooms, payments])
@@ -63,13 +66,40 @@ export default function PaymentsPage() {
 
   const computePaymentStatus = (payment: Payment) => {
     const boarder = boarders.find((b) => b.id === payment.boarderId)
-    const room = rooms.find((r) => r.id === boarder?.room || r.roomNumber === boarder?.room)
-    const roomPrice = room?.price || 0
-    const amount = Number(payment.amount || 0)
-    if (amount === 0) return 'Due'
-    if (roomPrice === 0) return 'Paid'
-    if (amount >= roomPrice) return 'Paid'
-    return 'Partial'
+    if (!boarder) {
+      // fallback to simple heuristic when no boarder found
+      const amount = Number(payment.amount || 0)
+      return amount === 0 ? 'Due' : 'Paid'
+    }
+
+    const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+
+    // First compute initial totals to allow derived status resolution
+    const initialTotals = getBoarderTotals(boarder, paymentsFor, room)
+    const derived = getDerivedBoarderStatus(boarder, initialTotals.totalDue)
+    const { ledger, totalDue, advance } = getBoarderTotals(boarder, paymentsFor, room, derived)
+
+    // Determine month for this payment (prefer payment.date then dueDate)
+    const month = (payment.date || payment.dueDate || '').slice(0, 7)
+    const entry = ledger.find((e) => e.month === month)
+
+    if (entry) {
+      // BOOKED months have rent === 0; payments count as advance
+      if (entry.rent === 0) {
+        return entry.advance > 0 ? 'Advance' : 'Paid'
+      }
+      if (entry.due === 0) return 'Paid'
+      if (entry.paid > 0 && entry.due > 0) return 'Partial'
+      if (entry.paid === 0 && entry.due > 0) return 'Due'
+      return 'Due'
+    }
+
+    // If no ledger entry for the month, classify based on overall totals
+    if (totalDue <= 0) {
+      return advance > 0 ? 'Advance' : 'Paid'
+    }
+    return 'Due'
   }
 
   const paidCount = useMemo(() => payments.filter((p) => computePaymentStatus(p) === 'Paid').length, [payments, boarders, rooms])
@@ -141,15 +171,15 @@ export default function PaymentsPage() {
         const roomInfo = boarder ? getBoarderRoomInfo(boarder, rooms) : { roomNumber: payment.room, price: 0 }
         const paymentsFor = boarder ? payments.filter((p) => p.boarderId === boarder.id) : [payment]
         const { totalDue } = boarder ? getBoarderTotals(boarder, paymentsFor, room) : { totalDue: 0 }
-        const boarderStatus = boarder ? normalizeBoarderStatus(boarder.status) : 'ACTIVE'
-        const shouldInclude = !boarder || !isArchivedBoarder(boarder.status, totalDue)
+        const derivedStatus = boarder ? getDerivedBoarderStatus(boarder, totalDue) : 'ACTIVE'
+        const shouldInclude = !boarder || !isArchivedBoarder(boarder, totalDue)
         return {
           id: payment.id,
           payment,
           boarderName: boarder?.name || payment.guest,
           roomNumber: roomInfo.roomNumber || payment.room,
           status: payment.status,
-          boarderStatus,
+          boarderStatus: derivedStatus,
           totalDue,
           amount: payment.amount,
           method: payment.method,
@@ -283,7 +313,7 @@ export default function PaymentsPage() {
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Guest</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Room</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Amount</th>
-                <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Due Date</th>
+                <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Payment Date</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Status</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Method</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Actions</th>

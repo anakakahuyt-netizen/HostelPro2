@@ -1,3 +1,9 @@
+﻿/*
+ * ARCHITECTURE LOCK - HostelPro V1.2
+ * Ledger calculations are core to system correctness and are locked.
+ * DO NOT MODIFY the ledger algorithms or formulas. Only comments or types allowed.
+ */
+
 import type { Boarder, BoarderRoomHistoryEntry, Payment, Room } from '../types'
 
 export type NormalizedBoarderStatus = 'ACTIVE' | 'BOOKED' | 'CHECKED_OUT' | 'CLOSED'
@@ -12,16 +18,78 @@ export interface PaymentLedgerEntry {
 
 export function normalizeBoarderStatus(status: string): NormalizedBoarderStatus {
   const normalized = String(status || '').trim().toUpperCase()
-  if (normalized === 'ACTIVE' || normalized === 'ACTIVE') return 'ACTIVE'
+  if (normalized === 'ACTIVE') return 'ACTIVE'
   if (normalized === 'PENDING' || normalized === 'BOOKED') return 'BOOKED'
   if (normalized === 'CHECKED-OUT' || normalized === 'CHECKED_OUT') return 'CHECKED_OUT'
   if (normalized === 'CLOSED') return 'CLOSED'
   return 'ACTIVE'
 }
 
-export function isArchivedBoarder(status: string, totalDue: number) {
-  const normalized = normalizeBoarderStatus(status)
-  return normalized === 'CLOSED' || (normalized === 'CHECKED_OUT' && totalDue === 0)
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function parseMonth(value?: string) {
+  if (!value) return ''
+  const sanitized = value.trim()
+  if (/^\d{4}-\d{2}$/.test(sanitized)) return sanitized
+  if (/^\d{4}-\d{2}-\d{2}$/.test(sanitized)) return sanitized.slice(0, 7)
+  return ''
+}
+
+function compareMonth(a: string, b: string) {
+  if (a === b) return 0
+  return a < b ? -1 : 1
+}
+
+function nextMonth(month: string) {
+  const [yearStr, monthStr] = month.split('-')
+  const year = Number(yearStr)
+  const mon = Number(monthStr)
+  if (Number.isNaN(year) || Number.isNaN(mon)) return ''
+  const next = new Date(year, mon, 1)
+  if (Number.isNaN(next.getTime())) return ''
+  return monthKey(next)
+}
+
+function getBoarderAdvanceAmount(boarder: Boarder) {
+  // Prefer the new persisted `advanceBalance`, fall back to legacy `advanceAmount`
+  return Number(boarder.advanceBalance ?? boarder.advanceAmount ?? 0) || 0
+}
+
+export function getDerivedBoarderStatus(boarder: Boarder, totalDue: number): NormalizedBoarderStatus {
+  const normalized = normalizeBoarderStatus(boarder.status)
+  const currentMonth = monthKey(new Date())
+  const moveInMonth = parseMonth(boarder.moveInMonth || boarder.checkIn)
+  const checkoutMonth = parseMonth(boarder.checkoutMonth || boarder.checkOut)
+
+  if (normalized === 'BOOKED') {
+    if (moveInMonth && moveInMonth <= currentMonth) return 'ACTIVE'
+    return 'BOOKED'
+  }
+
+  if (normalized === 'ACTIVE') {
+    if (checkoutMonth && checkoutMonth <= currentMonth) {
+      if (totalDue <= 0) return 'CLOSED'
+      return 'CHECKED_OUT'
+    }
+    return 'ACTIVE'
+  }
+
+  if (normalized === 'CHECKED_OUT') {
+    if (totalDue <= 0) return 'CLOSED'
+    return 'CHECKED_OUT'
+  }
+
+  if (normalized === 'CLOSED') {
+    return 'CLOSED'
+  }
+
+  return normalized
+}
+
+export function isArchivedBoarder(boarder: Boarder, totalDue: number) {
+  return getDerivedBoarderStatus(boarder, totalDue) === 'CLOSED'
 }
 
 function toRoomHistoryEntry(entry: BoarderRoomHistoryEntry | undefined): { roomNumber: string; price: number } | undefined {
@@ -46,60 +114,43 @@ export function getBoarderRoomPrice(boarder: Boarder, room?: Room) {
   return history?.price || 0
 }
 
-export function getDerivedBoarderStatus(boarder: Boarder, totalDue: number): NormalizedBoarderStatus {
-  const normalized = normalizeBoarderStatus(boarder.status)
-  if (normalized === 'CHECKED_OUT' && totalDue === 0) return 'CLOSED'
-  return normalized
-}
-
 export function isRentActive(status: string) {
   const normalized = normalizeBoarderStatus(status)
   return normalized === 'ACTIVE' || normalized === 'CHECKED_OUT'
 }
 
-function monthKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
+export function getRentMonths(boarder: Boarder, effectiveStatus: NormalizedBoarderStatus) {
+  const startMonth = parseMonth(boarder.moveInMonth || boarder.checkIn)
+  if (!startMonth) return []
 
-function addMonth(month: string) {
-  if (!month || month === 'NaN-NaN' || month.split('-').length !== 2) {
-    return ''
+  const currentMonth = monthKey(new Date())
+  let endMonth = currentMonth
+
+  if (effectiveStatus === 'CHECKED_OUT' || effectiveStatus === 'CLOSED') {
+    const checkoutMonth = parseMonth(boarder.checkoutMonth || boarder.checkOut)
+    if (checkoutMonth) {
+      endMonth = checkoutMonth
+    }
   }
-  const [yearStr, monthStr] = month.split('-')
-  const year = Number(yearStr)
-  const mon = Number(monthStr)
-  if (Number.isNaN(year) || Number.isNaN(mon)) return ''
-  const next = new Date(year, mon, 1)
-  if (Number.isNaN(next.getTime())) return ''
-  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`
-}
 
-export function getRentMonths(boarder: Boarder): string[] {
-  const status = normalizeBoarderStatus(boarder.status)
-  if (!boarder.checkIn || status === 'BOOKED') return []
-  const start = new Date(boarder.checkIn)
-  if (isNaN(start.getTime())) return []
-  const end = boarder.checkOut ? new Date(boarder.checkOut) : new Date()
-  if (isNaN(end.getTime())) return []
+  if (compareMonth(startMonth, endMonth) > 0) return []
 
   const months: string[] = []
-  let current = monthKey(start)
-  const last = monthKey(end)
+  let current = startMonth
   let safety = 0
-  while (current && current !== last) {
+  while (current && compareMonth(current, endMonth) <= 0) {
     months.push(current)
-    current = addMonth(current)
+    current = nextMonth(current)
     safety++
     if (safety > 240) break
   }
-  if (last) months.push(last)
   return months
 }
 
-export function buildLedger(boarder: Boarder, payments: Payment[], room?: Room): PaymentLedgerEntry[] {
-  const status = normalizeBoarderStatus(boarder.status)
+export function buildLedger(boarder: Boarder, payments: Payment[], room?: Room, effectiveStatus?: NormalizedBoarderStatus): PaymentLedgerEntry[] {
+  const status = effectiveStatus || normalizeBoarderStatus(boarder.status)
   const roomPrice = getBoarderRoomPrice(boarder, room)
-  const months = getRentMonths(boarder)
+  const months = getRentMonths(boarder, status)
   const grouped = payments.reduce<Record<string, number>>((acc, payment) => {
     if (!payment.date) return acc
     const month = payment.date.slice(0, 7)
@@ -107,9 +158,9 @@ export function buildLedger(boarder: Boarder, payments: Payment[], room?: Room):
     return acc
   }, {})
   const ledger: PaymentLedgerEntry[] = []
-  let carry = 0
+  let carry = getBoarderAdvanceAmount(boarder)
   for (const month of months) {
-    const rent = status === 'BOOKED' ? 0 : roomPrice
+    const rent = status === 'BOOKED' || status === 'CLOSED' ? 0 : roomPrice
     const paid = grouped[month] || 0
     const net = carry + paid - rent
     const due = Math.max(0, -net)
@@ -120,18 +171,140 @@ export function buildLedger(boarder: Boarder, payments: Payment[], room?: Room):
   if (!months.length && status === 'BOOKED') {
     const month = new Date().toISOString().slice(0, 7)
     const paid = payments.reduce((sum, p) => sum + p.amount, 0)
-    const net = paid
+    const net = carry + paid
     const advance = Math.max(0, net)
     ledger.push({ month, rent: 0, paid, due: 0, advance })
   }
   return ledger
 }
 
-export function getBoarderTotals(boarder: Boarder, payments: Payment[], room?: Room) {
-  const ledger = buildLedger(boarder, payments, room)
+export function getBoarderTotals(boarder: Boarder, payments: Payment[], room?: Room, effectiveStatus?: NormalizedBoarderStatus) {
+  const ledger = buildLedger(boarder, payments, room, effectiveStatus)
+  
+  // Total rent charged across all generated months
   const totalRent = ledger.reduce((sum, entry) => sum + entry.rent, 0)
-  const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0)
-  const totalDue = Math.max(0, totalRent - totalPaid)
-  const advance = Math.max(0, totalPaid - totalRent)
-  return { ledger, totalRent, totalPaid, totalDue, advance }
+  
+  // Opening due: previous outstanding balance
+  const openingDue = Number(boarder.openingDue ?? 0) || 0
+  
+  // Total charges = Opening due + All monthly rent generated by ledger
+  // This is what the boarder owes in total
+  const totalCharges = openingDue + totalRent
+  
+  // Total paid = All payments received + Advance balance (prepayment credit)
+  // This is what reduces the due amount
+  const totalPayments = payments.reduce((sum, payment) => sum + payment.amount, 0)
+  const advanceBalance = getBoarderAdvanceAmount(boarder)
+  const totalPaid = totalPayments + advanceBalance
+  
+  // Total due = max(0, totalCharges - totalPaid)
+  // What the boarder still owes after accounting for all payments and credits
+  const totalDue = Math.max(0, totalCharges - totalPaid)
+  
+  // Excess credit if totalPaid exceeds totalCharges
+  const advance = Math.max(0, totalPaid - totalCharges)
+  
+  // Current month due: from ledger's latest entry (already has advance/payments applied month-by-month)
+  // Do NOT add this to totalCharges as it's already included in the ledger calculation
+  const currentMonthDue = ledger.length ? ledger[ledger.length - 1].due : 0
+
+  return { ledger, totalRent, totalPaid, totalCharges, totalDue, advance, openingDue, currentMonthDue }
+}
+
+export function isBoarderOccupyingBed(boarder: Boarder, payments: Payment[], room?: Room, referenceMonth = monthKey(new Date())) {
+  const normalized = normalizeBoarderStatus(boarder.status)
+  const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
+  const { totalDue } = getBoarderTotals(boarder, payments, room, effectiveStatus)
+  const derived = getDerivedBoarderStatus(boarder, totalDue)
+
+  if (derived === 'ACTIVE') return true
+
+  if (derived === 'BOOKED') {
+    const moveInMonth = parseMonth(boarder.moveInMonth || boarder.checkIn)
+    return moveInMonth !== '' && nextMonth(referenceMonth) === moveInMonth
+  }
+
+  if (derived === 'CHECKED_OUT') {
+    const checkoutMonth = parseMonth(boarder.checkoutMonth || boarder.checkOut)
+    return checkoutMonth !== '' && nextMonth(referenceMonth) === checkoutMonth
+  }
+
+  return false
+}
+
+/**
+ * Get all boarders currently occupying a specific room.
+ * Uses isBoarderOccupyingBed as single source of truth.
+ * Returns array of occupants for room card display, count, and progress calculations.
+ */
+export function getRoomOccupants(roomId: string | number, boarders: Boarder[], payments: Payment[], rooms: Room[], referenceMonth = monthKey(new Date())): Boarder[] {
+  return boarders.filter((boarder) => {
+    if (boarder.room !== roomId) return false
+    const room = rooms.find((r) => r.id === roomId || r.roomNumber === roomId)
+    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+    return isBoarderOccupyingBed(boarder, paymentsFor, room, referenceMonth)
+  })
+}
+
+/**
+ * Phase 12.7 - Lifecycle helpers for boarder automation
+ * These encapsulate business rules for ACTIVE, BOOKED, and CHECKED_OUT states.
+ */
+
+/**
+ * Create a new ACTIVE boarder with automatic activation.
+ * - Current month becomes checkIn automatically
+ * - Boarder occupies bed immediately
+ * Rules: bio (name, email, phone), room, opening due (optional)
+ */
+export function createActiveBoarder(partial: Partial<Boarder>): Boarder {
+  const now = new Date()
+  const currentMonth = monthKey(now)
+  const [year, month] = currentMonth.split('-')
+  const checkInDate = `${year}-${month}-01`
+
+  return {
+    id: partial.id || crypto.randomUUID(),
+    name: partial.name || '',
+    email: partial.email || '',
+    phone: partial.phone || '',
+    room: partial.room || '',
+    monthlyRent: partial.monthlyRent || 0,
+    status: 'ACTIVE',
+    checkIn: checkInDate,
+    checkOut: '',
+    openingDue: partial.openingDue || 0,
+    advanceBalance: 0,
+    notes: partial.notes || '',
+    roomHistory: partial.roomHistory || [],
+    archived: false,
+  }
+}
+
+/**
+ * Create a new BOOKED boarder with future activation.
+ * - moveInMonth is the target activation month (e.g., "2026-10")
+ * - One month before activation: occupies bed with BOOKED badge
+ * - Activation month: automatically becomes ACTIVE
+ * - Advance payment (if provided) should be stored separately in advanceBalance
+ * Rules: bio, room, moveInMonth (activation date)
+ */
+export function createBookedBoarder(partial: Partial<Boarder>): Boarder {
+  return {
+    id: partial.id || crypto.randomUUID(),
+    name: partial.name || '',
+    email: partial.email || '',
+    phone: partial.phone || '',
+    room: partial.room || '',
+    monthlyRent: partial.monthlyRent || 0,
+    status: 'BOOKED',
+    checkIn: '',
+    checkOut: '',
+    moveInMonth: partial.moveInMonth || '',
+    openingDue: 0,
+    advanceBalance: partial.advanceBalance || 0,
+    notes: partial.notes || '',
+    roomHistory: partial.roomHistory || [],
+    archived: false,
+  }
 }

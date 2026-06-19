@@ -1,9 +1,16 @@
+/*
+ * ARCHITECTURE LOCK - HostelPro V1.2
+ * Stable area: Boarder UI and ledger are locked. Avoid behavioral changes.
+ * Permitted: comments, type annotations, and documentation only.
+ */
+
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
-import { getBoarderRoomInfo, getBoarderTotals, isArchivedBoarder, normalizeBoarderStatus } from '../utils/boarderLedger'
+import type { NormalizedBoarderStatus } from '../utils/boarderLedger'
+import { getBoarderRoomInfo, getBoarderRoomPrice, getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus } from '../utils/boarderLedger'
 import formatCurrency from '../utils/formatCurrency'
 import { Users, Search, Filter, Plus, Eye, Edit2, Trash2, Mail, Phone, MapPin, UserCheck } from 'lucide-react'
 import Modal from '../components/modals/Modal'
@@ -36,7 +43,7 @@ export default function BoardersPage() {
   const bookedSectionRef = useRef<HTMLDivElement | null>(null)
   const checkedOutSectionRef = useRef<HTMLDivElement | null>(null)
 
-  const statusStyles = {
+  const statusStyles: Record<NormalizedBoarderStatus, string> = {
     ACTIVE: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
     BOOKED: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
     CHECKED_OUT: 'bg-slate-500/15 text-slate-300 border border-slate-500/30',
@@ -44,29 +51,45 @@ export default function BoardersPage() {
   }
 
   const matchesSearch = (boarder: typeof boarders[number]) => {
-    const roomInfo = getBoarderRoomInfo(boarder, rooms)
     const q = query.toLowerCase()
-    const roomString = `${boarder.room || ''} ${roomInfo.roomNumber || ''}`.toLowerCase()
     if (roomFilter) {
+      const roomInfo = getBoarderRoomInfo(boarder, rooms)
       const roomMatch = boarder.room === roomFilter || roomInfo.roomNumber === roomFilter
       if (!roomMatch) return false
     }
     return (
       boarder.name.toLowerCase().includes(q) ||
-      boarder.phone.toLowerCase().includes(q) ||
-      roomString.includes(q)
+      boarder.phone.toLowerCase().includes(q)
     )
   }
 
-  const activeBoarderList = useMemo(() => boarders.filter((b) => normalizeBoarderStatus(b.status) === 'ACTIVE' && matchesSearch(b)), [boarders, rooms, query, roomFilter])
-  const bookedBoarderList = useMemo(() => boarders.filter((b) => normalizeBoarderStatus(b.status) === 'BOOKED' && matchesSearch(b)), [boarders, rooms, query, roomFilter])
-  const checkedOutBoarderList = useMemo(() => boarders.filter((b) => {
-    if (normalizeBoarderStatus(b.status) !== 'CHECKED_OUT') return false
-    const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
-    const paymentsFor = payments.filter((p) => p.boarderId === b.id)
-    const { totalDue } = getBoarderTotals(b, paymentsFor, room)
-    return !isArchivedBoarder(b.status, totalDue) && matchesSearch(b)
-  }), [boarders, rooms, payments, query, roomFilter])
+  const dueMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    boarders.forEach((b) => {
+      const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
+      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
+      const normalized = normalizeBoarderStatus(b.status)
+      const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(b, 0)
+      const { totalDue } = getBoarderTotals(b, paymentsFor, room, effectiveStatus)
+      map[b.id] = totalDue
+    })
+    return map
+  }, [boarders, rooms, payments])
+
+  const derivedStatusMap = useMemo(() => {
+    const map: Record<string, NormalizedBoarderStatus> = {}
+    boarders.forEach((b) => {
+      map[b.id] = getDerivedBoarderStatus(b, dueMap[b.id] ?? 0)
+    })
+    return map
+  }, [boarders, dueMap])
+
+  const getDerivedStatus = (boarder: typeof boarders[number]): NormalizedBoarderStatus => derivedStatusMap[boarder.id] || normalizeBoarderStatus(boarder.status)
+
+  const activeBoarderList = useMemo(() => boarders.filter((b) => getDerivedStatus(b) === 'ACTIVE' && matchesSearch(b)), [boarders, rooms, query, roomFilter, derivedStatusMap])
+  const bookedBoarderList = useMemo(() => boarders.filter((b) => getDerivedStatus(b) === 'BOOKED' && matchesSearch(b)), [boarders, rooms, query, roomFilter, derivedStatusMap])
+  const checkedOutBoarderList = useMemo(() => boarders.filter((b) => getDerivedStatus(b) === 'CHECKED_OUT' && matchesSearch(b)), [boarders, rooms, query, roomFilter, derivedStatusMap])
+  const archivedBoarderList = useMemo(() => boarders.filter((b) => getDerivedStatus(b) === 'CLOSED' && matchesSearch(b)), [boarders, rooms, query, roomFilter, derivedStatusMap])
 
   const totalRent = useMemo(() => {
     return activeBoarderList.reduce((sum, boarder) => {
@@ -75,30 +98,11 @@ export default function BoardersPage() {
     }, 0)
   }, [activeBoarderList, rooms])
 
-  const dueMap = useMemo(() => {
-    const map: Record<string, number> = {}
-    boarders.forEach((b) => {
-      const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
-      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
-      const { totalDue } = getBoarderTotals(b, paymentsFor, room)
-      if (normalizeBoarderStatus(b.status) === 'BOOKED') {
-        map[b.id] = 0
-      } else {
-        map[b.id] = totalDue
-      }
-    })
-    return map
-  }, [boarders, rooms, payments])
-
-  const archivedBoarderList = useMemo(() => {
-    return boarders.filter((b) => isArchivedBoarder(b.status, dueMap[b.id] ?? 0) && matchesSearch(b))
-  }, [boarders, rooms, payments, query, roomFilter, dueMap])
-
-  const totalBoarders = boarders.length
-  const activeBoarders = boarders.filter((b) => normalizeBoarderStatus(b.status) === 'ACTIVE').length
+  const activeBoarders = activeBoarderList.length
   const bookedBoarders = bookedBoarderList.length
   const checkedOutBoarders = checkedOutBoarderList.length
-  const closedBoarders = boarders.filter((b) => isArchivedBoarder(b.status, dueMap[b.id] ?? 0)).length
+  const closedBoarders = archivedBoarderList.length
+  const totalBoarders = activeBoarders + bookedBoarders + checkedOutBoarders + closedBoarders
 
   const boarderStats = [
     { label: 'Total Boarders', value: String(totalBoarders), change: `${activeBoarders} active`, icon: 'Users', accent: 'from-indigo-500 to-sky-500', tab: 'active' },
@@ -108,7 +112,7 @@ export default function BoardersPage() {
     { label: 'Archived', value: String(closedBoarders), change: 'Closed', icon: 'Users', accent: 'from-slate-500 to-slate-400', tab: 'archived' },
   ]
 
-  const occupiedBeds = rooms.reduce((sum, room) => sum + room.occupied, 0)
+  const occupiedBeds = activeBoarderList.length
   const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0)
   const averageStayMonths = useMemo(() => {
     const now = new Date()
@@ -127,7 +131,7 @@ export default function BoardersPage() {
   const boarderOccupancyRate = totalCapacity ? Math.round((occupiedBeds / totalCapacity) * 100) : 0
   const averageStayLabel = `${averageStayMonths ? averageStayMonths.toFixed(1) : '0.0'} months`
   const occupancyLabel = `${boarderOccupancyRate}%`
-  const occupiedRoomCount = rooms.filter((room) => room.occupied > 0).length
+  const occupiedRoomCount = rooms.filter((room) => activeBoarderList.some((b) => b.room === room.id || b.room === room.roomNumber)).length
 
   useEffect(() => {
     const section = (location.state as { section?: string })?.section
@@ -158,6 +162,14 @@ export default function BoardersPage() {
       console.error('[BoardersPage] debug failed', err)
     }
   }, [boarders])
+
+  const currentListLength = tab === 'active'
+    ? activeBoarderList.length
+    : tab === 'booked'
+      ? bookedBoarderList.length
+      : tab === 'checked-out'
+        ? checkedOutBoarderList.length
+        : archivedBoarderList.length
 
   return (
     <div className="space-y-8">
@@ -231,9 +243,9 @@ export default function BoardersPage() {
 
       {tab === 'active' && (
       <section ref={activeSectionRef} className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
-        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="mb-6 flex items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-white">Resident List</h2>
-          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">{boarders.length} total</span>
+          <span className="rounded-full bg-slate-800/80 px-3 py-1 text-sm font-medium text-slate-300">{totalBoarders} total</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -251,58 +263,71 @@ export default function BoardersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {activeBoarderList.map((boarder) => (
-                <tr key={boarder.id} className="transition hover:bg-slate-800/40">
-                  <td className="px-4 py-4">
-                    <span className="font-mono text-sm font-semibold text-indigo-400">{boarder.id}</span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <p className="font-medium text-white">{boarder.name}</p>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="space-y-1 text-xs text-slate-400">
-                      <p className="flex items-center gap-2"><Mail className="h-3 w-3" />{boarder.email}</p>
-                      <p className="flex items-center gap-2"><Phone className="h-3 w-3" />{boarder.phone}</p>
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-sm text-slate-300"><MapPin className="h-3 w-3 mr-1" />{boarder.room}</span>
-                  </td>
-                  <td className="px-4 py-4 text-sm text-slate-400">{boarder.checkIn}</td>
-                  <td className="px-4 py-4">
-                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[boarder.status]}`}>
-                      {boarder.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <p className="font-semibold text-emerald-400">৳{rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)?.price || 0}</p>
-                    <p className="text-sm text-slate-400">Due: ৳{dueMap[boarder.id] ?? 0}</p>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setViewing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => setEditing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => {
-                        const due = dueMap[boarder.id] ?? 0
-                        if (due > 0) setConfirmDelete({ id: boarder.id, name: boarder.name, message: 'This boarder has unpaid dues. Are you sure?' })
-                        else setConfirmDelete({ id: boarder.id, name: boarder.name })
-                      }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
+              {activeBoarderList.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-400">No boarders found.</td>
                 </tr>
-              ))}
+              ) : activeBoarderList.map((boarder) => {
+                const roomInfo = getBoarderRoomInfo(boarder, rooms)
+                const monthly = getBoarderRoomPrice(boarder, rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)) || (roomInfo.price ?? 0)
+                return (
+                  <tr key={boarder.id} className="transition hover:bg-slate-800/40">
+                    <td className="px-4 py-4">
+                      <span className="font-mono text-sm font-semibold text-indigo-400">{boarder.name.split(' ')[0]}-{roomInfo.roomNumber}</span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <p className="font-medium text-white">{boarder.name}</p>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="space-y-1 text-xs text-slate-400">
+                        <p className="flex items-center gap-2"><Mail className="h-3 w-3" />{boarder.email}</p>
+                        <p className="flex items-center gap-2"><Phone className="h-3 w-3" />{boarder.phone}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-sm text-slate-300"><MapPin className="h-3 w-3 mr-1" />{roomInfo.roomNumber || boarder.room}</span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-slate-400">{boarder.checkIn}</td>
+                    <td className="px-4 py-4">
+                      {(() => {
+                        const derivedStatus = getDerivedStatus(boarder)
+                        return (
+                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[derivedStatus]}`}>
+                            {derivedStatus}
+                          </span>
+                        )
+                      })()}
+                    </td>
+                    <td className="px-4 py-4">
+                      <p className="font-semibold text-emerald-400">৳{monthly}</p>
+                      <p className="text-sm text-slate-400">Due: ৳{dueMap[boarder.id] ?? 0}</p>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setViewing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setEditing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => {
+                          const due = dueMap[boarder.id] ?? 0
+                          if (due > 0) setConfirmDelete({ id: boarder.id, name: boarder.name, message: 'This boarder has unpaid dues. Are you sure?' })
+                          else setConfirmDelete({ id: boarder.id, name: boarder.name })
+                        }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
 
-        <div className="mt-6 flex items-center justify-between border-t border-slate-800/50 pt-6">
-          <p className="text-sm text-slate-400">Showing 1 to {boarders.length} of {boarders.length} results</p>
+          <div className="mt-6 flex items-center justify-between border-t border-slate-800/50 pt-6">
+          <p className="text-sm text-slate-400">Showing {currentListLength ? 1 : 0} to {currentListLength} of {currentListLength} results</p>
           <div className="flex gap-2">
             <button className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50">
               Previous
@@ -330,17 +355,29 @@ export default function BoardersPage() {
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Room</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Check-in</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Status</th>
+                <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {bookedBoarderList.map((boarder) => {
+              {bookedBoarderList.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No bookings found.</td>
+                </tr>
+              ) : bookedBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 return (
                   <tr key={boarder.id} className="transition hover:bg-slate-800/40">
                     <td className="px-4 py-4"><p className="font-medium text-white">{boarder.name}</p></td>
                     <td className="px-4 py-4"><span className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-sm text-slate-300">{roomInfo.roomNumber}</span></td>
                     <td className="px-4 py-4 text-sm text-slate-400">{boarder.checkIn || 'N/A'}</td>
-                    <td className="px-4 py-4"><span className="inline-flex rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300">BOOKED</span></td>
+                    <td className="px-4 py-4">{(() => {
+                      const derivedStatus = getDerivedStatus(boarder)
+                      return (
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[derivedStatus]}`}>
+                          {derivedStatus}
+                        </span>
+                      )
+                    })()}</td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
                         <button onClick={() => setViewing(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
@@ -378,10 +415,15 @@ export default function BoardersPage() {
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Check-in</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Check-out</th>
                 <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Due</th>
+                <th className="px-4 py-4 text-left text-xs uppercase tracking-[0.28em] text-slate-500 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {checkedOutBoarderList.map((boarder) => {
+              {checkedOutBoarderList.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-400">No checked-out boarders.</td>
+                </tr>
+              ) : checkedOutBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 return (
                   <tr key={boarder.id} className="transition hover:bg-slate-800/40">
@@ -429,13 +471,24 @@ export default function BoardersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {archivedBoarderList.map((boarder) => {
+              {archivedBoarderList.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No archived boarders.</td>
+                </tr>
+              ) : archivedBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 return (
                   <tr key={boarder.id} className="transition hover:bg-slate-800/40">
                     <td className="px-4 py-4"><p className="font-medium text-white">{boarder.name}</p></td>
                     <td className="px-4 py-4"><span className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-sm text-slate-300">{roomInfo.roomNumber}</span></td>
-                    <td className="px-4 py-4"><span className="inline-flex rounded-full px-3 py-1 text-xs font-semibold text-slate-400">ARCHIVED</span></td>
+                    <td className="px-4 py-4">{(() => {
+                      const derivedStatus = getDerivedStatus(boarder)
+                      return (
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[derivedStatus]}`}>
+                          {derivedStatus}
+                        </span>
+                      )
+                    })()}</td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
                         <button onClick={() => updateBoarder(boarder.id, { status: 'ACTIVE', archived: false })} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-emerald-400">
@@ -474,14 +527,13 @@ export default function BoardersPage() {
         {currentView && (
           <div className="mt-4 grid gap-2">
             <p><strong>Name:</strong> {currentView.name}</p>
-            <p><strong>ID:</strong> {currentView.id}</p>
             <p><strong>Phone:</strong> {currentView.phone}</p>
             <p><strong>Email:</strong> {currentView.email}</p>
             <p><strong>Room:</strong> {viewRoom ? viewRoom.roomNumber : currentView.room}</p>
-            <p><strong>Monthly rent:</strong> ৳{viewRoom?.price || 0}</p>
+            <p><strong>Monthly rent:</strong> ৳{getBoarderRoomPrice(currentView, viewRoom)}</p>
             <p><strong>Check-in date:</strong> {currentView.checkIn}</p>
             <p><strong>Check-out date:</strong> {currentView.checkOut || 'N/A'}</p>
-            <p><strong>Status:</strong> {normalizeBoarderStatus(currentView.status)}</p>
+            <p><strong>Status:</strong> {getDerivedStatus(currentView)}</p>
             <p><strong>Total due:</strong> ৳{dueMap[currentView.id] ?? 0}</p>
             <p><strong>Payment history:</strong></p>
             <div className="text-sm text-slate-400">

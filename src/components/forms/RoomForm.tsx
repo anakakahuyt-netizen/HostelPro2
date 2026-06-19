@@ -1,3 +1,9 @@
+/*
+ * ARCHITECTURE LOCK - HostelPro V1.2
+ * RoomForm layout and fields are part of the stable UI. Do not change visible fields or behavior.
+ * This top comment documents allowed edits: comments or non-functional type hints only.
+ */
+
 import React from 'react'
 import type { Room } from '../../types'
 
@@ -17,11 +23,14 @@ export default function RoomForm({ initial, onSubmit }: { initial?: Partial<Room
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    const id = (state.id as string) || `R-${Date.now()}`
+    const id = (state.id as string) || crypto.randomUUID()
     const type = (state.type as Room['type']) || 'Single'
+    const roomNumber = state.roomNumber || initial?.roomNumber || ''
+    const roomName = (state.name as string) || initial?.name || ''
     const room: Room = {
       id,
-      roomNumber: state.roomNumber || '',
+      roomNumber,
+      name: roomName,
       type,
       floor: Number(state.floor || 1),
       capacity: getCapacityForType(type),
@@ -42,7 +51,6 @@ export default function RoomForm({ initial, onSubmit }: { initial?: Partial<Room
         <option>Triple</option>
         <option>Quad</option>
       </select>
-      <input className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" placeholder="Floor" type="number" value={state.floor || ''} onChange={(e) => handle('floor', Number(e.target.value))} />
       <input className="rounded-2xl border border-slate-700 bg-slate-950 py-3 px-4" placeholder="Monthly Rent" type="number" value={state.price || ''} onChange={(e) => handle('price', Number(e.target.value))} />
       <div className="sm:col-span-2 flex justify-end gap-2">
         <button type="submit" className="rounded-2xl bg-emerald-500/20 px-4 py-2 text-emerald-300">Save</button>

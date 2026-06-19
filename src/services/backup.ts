@@ -1,6 +1,7 @@
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
+import { getTodayDate } from '../utils/dateUtils'
 import * as databaseAdapter from './database/databaseAdapter'
 
 export function exportBackup() {
@@ -13,7 +14,7 @@ export function exportBackup() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `hostelpro-backup-${new Date().toISOString().slice(0,10)}.json`
+  a.download = `hostelpro-backup-${getTodayDate()}.json`
   document.body.appendChild(a)
   a.click()
   a.remove()

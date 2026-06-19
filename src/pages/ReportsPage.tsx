@@ -1,3 +1,9 @@
+/*
+ * ARCHITECTURE LOCK - HostelPro V1.2
+ * DO NOT change UI, Ledger calculations, CSV import rules, database shape, or payment logic.
+ * Only non-functional comments or type hints are permitted to preserve V1.2 stability.
+ */
+
 import React, { useEffect } from 'react'
 import { BarChart3, PieChart, TrendingUp, Download, Calendar, Filter, ArrowUp, ArrowDown } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
@@ -6,6 +12,8 @@ import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
 import { downloadCSV } from '../services/export'
 import { showToast } from '../services/toast'
+import { getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus, isBoarderOccupyingBed } from '../utils/boarderLedger'
+import { getTodayDate } from '../utils/dateUtils'
 
 interface Report {
   id: string
@@ -37,12 +45,27 @@ export default function ReportsPage() {
 
   const pendingDuesReport = boarders.map((b) => {
     const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
-    const roomPrice = room?.price || 0
-    const paid = payments.filter((p) => p.boarderId === b.id).reduce((s, p) => s + p.amount, 0)
-    return { id: b.id, name: b.name, room: b.room, monthlyRent: roomPrice, paid, due: Math.max(0, roomPrice - paid) }
+    const paymentsFor = payments.filter((p) => p.boarderId === b.id)
+    const normalized = normalizeBoarderStatus(b.status)
+    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(b, 0)
+    const { totalDue } = getBoarderTotals(b, paymentsFor, room, effectiveStatus)
+    return { id: b.id, name: b.name, room: b.room, monthlyRent: room?.price || 0, due: totalDue }
   })
 
-  const occupancyReport = rooms.map((r) => ({ id: r.id, name: r.name, roomNumber: r.roomNumber, capacity: r.capacity, occupied: r.occupied, occupancyRate: r.capacity ? Math.round((r.occupied / r.capacity) * 100) : 0 }))
+  const occupancyReport = rooms.map((r) => {
+    const occupied = boarders.filter((boarder) => {
+      const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
+      return isBoarderOccupyingBed(boarder, paymentsFor, r)
+    }).length
+    return {
+      id: r.id,
+      name: r.name,
+      roomNumber: r.roomNumber,
+      capacity: r.capacity,
+      occupied,
+      occupancyRate: r.capacity ? Math.round((occupied / r.capacity) * 100) : 0,
+    }
+  })
 
   const reports: Report[] = [
     {
@@ -51,7 +74,7 @@ export default function ReportsPage() {
       type: 'Guest',
       period: currentMonthLabel,
       status: boarders.length ? 'Completed' : 'Pending',
-      generatedDate: boarders.length ? new Date().toISOString().slice(0, 10) : '',
+      generatedDate: boarders.length ? getTodayDate() : '',
       fileSize: `${Math.max(1, Math.round(boarders.length * 0.25))}.0 MB`,
     },
     {
@@ -60,7 +83,7 @@ export default function ReportsPage() {
       type: 'Financial',
       period: currentMonthLabel,
       status: payments.length ? 'Completed' : 'Pending',
-      generatedDate: payments.length ? new Date().toISOString().slice(0, 10) : '',
+      generatedDate: payments.length ? getTodayDate() : '',
       fileSize: `${Math.max(1, Math.round(payments.length * 0.15))}.0 MB`,
     },
     {
@@ -69,14 +92,23 @@ export default function ReportsPage() {
       type: 'Occupancy',
       period: currentMonthLabel,
       status: rooms.length ? 'Completed' : 'Pending',
-      generatedDate: rooms.length ? new Date().toISOString().slice(0, 10) : '',
+      generatedDate: rooms.length ? getTodayDate() : '',
       fileSize: `${Math.max(1, Math.round(rooms.length * 0.2))}.0 MB`,
     },
   ]
 
   const totalBoarders = boarders.length
-  const occupiedRooms = rooms.filter((room) => room.occupied > 0).length
-  const availableRooms = rooms.filter((room) => room.occupied < room.capacity).length
+  const occupiedRooms = rooms.filter((room) => boarders.some((boarder) => {
+    const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
+    return isBoarderOccupyingBed(boarder, paymentsFor, room)
+  })).length
+  const availableRooms = rooms.filter((room) => {
+    const occupied = boarders.filter((boarder) => {
+      const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
+      return isBoarderOccupyingBed(boarder, paymentsFor, room)
+    }).length
+    return occupied < room.capacity
+  }).length
 
   const monthlyIncome = payments
     .filter((payment) => payment.date && payment.date.slice(0,7) === nowMonth)
@@ -84,12 +116,14 @@ export default function ReportsPage() {
 
   const boarderDues = boarders.map((boarder) => {
     const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-    const roomPrice = room?.price || 0
-    const paid = payments
-      .filter((payment) => payment.boarderId === boarder.id)
-      .reduce((sum, payment) => sum + payment.amount, 0)
-    return Math.max(0, roomPrice - paid)
+    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+    const normalized = normalizeBoarderStatus(boarder.status)
+    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
+    const { totalDue } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
+    return totalDue
   })
+
+
 
   const totalPendingDues = boarderDues.reduce((sum, due) => sum + due, 0)
   const boardersWithDues = boarderDues.filter((due) => due > 0).length

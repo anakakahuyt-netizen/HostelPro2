@@ -14,7 +14,7 @@ function getRoomPrice(payment: Payment, rooms: Room[], boarders: Boarder[]) {
   return boarderRoom?.price || 0
 }
 
-function computePaymentStatus(payment: Payment, rooms: Room[], boarders: Boarder[]): PaymentStatus {
+export function computePaymentStatus(payment: Payment, rooms: Room[], boarders: Boarder[]): PaymentStatus {
   const amount = Number(payment.amount || 0)
   const rent = getRoomPrice(payment, rooms, boarders)
   if (amount === 0) return 'Due'

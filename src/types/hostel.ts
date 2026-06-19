@@ -8,9 +8,20 @@ export interface Boarder {
   email: string
   phone: string
   room: string
+  monthlyRent?: number
   status: BoarderStatus
   checkIn: string
   checkOut: string
+  moveInMonth?: string
+  checkoutMonth?: string
+  advanceAmount?: number
+  // Persisted opening and current month dues from CSV import
+  openingDue?: number
+  currentMonthDue?: number
+  // Persisted advance balance (new preferred field). Backwards-compatible with `advanceAmount`.
+  advanceBalance?: number
+  // Optional free-form notes for the boarder
+  notes?: string
   roomHistory?: BoarderRoomHistoryEntry[]
   archived?: boolean
 }

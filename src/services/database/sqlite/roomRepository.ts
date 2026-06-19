@@ -1,6 +1,20 @@
 import type { Room } from '../../../types'
 import { getDatabase } from '../../../../electron/services/databaseService.js'
 
+const getBuildingName = (roomNumber: string): string => {
+  const digits = Number(String(roomNumber).replace(/[^0-9]/g, ''))
+  if (!digits) return ''
+  if (digits >= 101 && digits <= 305) return 'Jubayer Mess Old'
+  if (digits >= 1001 && digits <= 3007) return 'Jubayer Mess New'
+  return ''
+}
+
+const normalizeRoom = (room: Room): Room => ({
+  ...room,
+  name: room.name || getBuildingName(room.roomNumber) || '',
+  amenities: room.amenities || [],
+})
+
 export class RoomRepository {
   getAll(): Room[] {
     const db = getDatabase()
@@ -24,7 +38,8 @@ export class RoomRepository {
       `INSERT OR REPLACE INTO rooms (id, roomNumber, name, type, floor, capacity, occupied, price, status, amenities)
        VALUES (@id, @roomNumber, @name, @type, @floor, @capacity, @occupied, @price, @status, @amenities)`,
     )
-    stmt.run({ ...room, amenities: JSON.stringify(room.amenities || []) })
+    const normalized = normalizeRoom(room)
+    stmt.run({ ...normalized, amenities: JSON.stringify(normalized.amenities) })
   }
 
   update(id: string, patch: Partial<Room>): void {
@@ -51,7 +66,8 @@ export class RoomRepository {
     const transaction = db.transaction((items: Room[]) => {
       db.prepare('DELETE FROM rooms').run()
       for (const room of items) {
-        insert.run({ ...room, amenities: JSON.stringify(room.amenities || []) })
+        const normalized = normalizeRoom(room)
+        insert.run({ ...normalized, amenities: JSON.stringify(normalized.amenities) })
       }
     })
     transaction(rooms)
