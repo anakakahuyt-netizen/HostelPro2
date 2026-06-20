@@ -12,6 +12,7 @@
     },
     "files": [
       "dist-electron/electron/**/*",
+      "dist-electron/src/**/*",
       "dist/**/*",
       "node_modules/**/*"
     ]
