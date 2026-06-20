@@ -29,22 +29,10 @@ function invokeSync<T>(channel: string, ...args: unknown[]): T {
 }
 
 export function getBoarders(): Boarder[] {
-  const result = invokeSync<Boarder[]>(GET_BOARDERS) || []
-  try {
-    // Temporary debug: trace IPC return values
-    console.debug('[sqliteAdapter] getBoarders ->', result.length, result.slice(0, 3))
-  } catch (err) {
-    // ignore logging errors
-  }
-  return result
+  return invokeSync<Boarder[]>(GET_BOARDERS) || []
 }
 
 export function saveBoarders(boarders: Boarder[]) {
-  try {
-    console.debug('[sqliteAdapter] saveBoarders ->', boarders.length, boarders.slice(0, 3))
-  } catch (err) {
-    // ignore logging errors
-  }
   invokeSync<boolean>(SAVE_BOARDERS, boarders)
 }
 

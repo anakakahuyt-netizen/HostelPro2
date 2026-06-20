@@ -24,21 +24,11 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
     // If SQLite is empty, try to load from localStorage (migration path)
     const storageBoarders = storageService.getBoarders()
     if (storageBoarders && storageBoarders.length > 0) {
-      console.log('[boarderStore] migrating', storageBoarders.length, 'boarders from localStorage to SQLite')
       databaseAdapter.saveBoarders(storageBoarders)
       boarders = storageBoarders
     }
   }
-  try {
-    const statusCounts = boarders.reduce<Record<string, number>>((acc, boarder) => {
-      const status = boarder.status || 'UNKNOWN'
-      acc[status] = (acc[status] ?? 0) + 1
-      return acc
-    }, {})
-    console.debug('[boarderStore] init boarders ->', boarders.length, boarders.slice(0, 3), statusCounts)
-  } catch (err) {
-    console.error('[boarderStore] init boarders debug failed', err)
-  }
+
   return {
     boarders,
     addBoarder: (b) => {

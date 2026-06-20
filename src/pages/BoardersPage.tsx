@@ -180,18 +180,7 @@ export default function BoardersPage() {
   const currentView = boarders.find((b) => b.id === viewing)
   const viewRoom = currentView ? rooms.find((r) => r.id === currentView.room || r.roomNumber === currentView.room) : undefined
 
-  useEffect(() => {
-    try {
-      const statusCounts = boarders.reduce<Record<string, number>>((acc, boarder) => {
-        const status = boarder.status || 'UNKNOWN'
-        acc[status] = (acc[status] ?? 0) + 1
-        return acc
-      }, {})
-      console.debug('[BoardersPage] boarders ->', boarders.length, boarders.slice(0, 3), statusCounts)
-    } catch (err) {
-      console.error('[BoardersPage] debug failed', err)
-    }
-  }, [boarders])
+
 
   const activePageCount = Math.max(1, Math.ceil(activeBoarderList.length / pageSize))
   const bookedPageCount = Math.max(1, Math.ceil(bookedBoarderList.length / pageSize))

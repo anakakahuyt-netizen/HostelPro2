@@ -21,7 +21,6 @@ export const useRoomStore = create<RoomState>((set, get) => {
     // If SQLite is empty, try to load from localStorage (migration path)
     const storageRooms = storageService.getRooms()
     if (storageRooms && storageRooms.length > 0) {
-      console.log('[roomStore] migrating', storageRooms.length, 'rooms from localStorage to SQLite')
       databaseAdapter.saveRooms(storageRooms)
       rooms = storageRooms
     }

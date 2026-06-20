@@ -68,7 +68,6 @@ export const usePaymentStore = create<PaymentState>((set, get) => {
     // If SQLite is empty, try to load from localStorage (migration path)
     const storagePayments = storageService.getPayments()
     if (storagePayments && storagePayments.length > 0) {
-      console.log('[paymentStore] migrating', storagePayments.length, 'payments from localStorage to SQLite')
       const normalizedPayments = normalizePayments(storagePayments)
       databaseAdapter.savePayments(normalizedPayments)
       payments = normalizedPayments
