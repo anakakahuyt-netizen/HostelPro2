@@ -59,6 +59,7 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
         databaseAdapter.saveBoarders(next)
         return { boarders: next }
       })
+      showToast('Boarder added')
       logActivity({
         type: 'BoarderAdded',
         message: `Boarder added: ${boarder.name}`,

@@ -18,6 +18,7 @@ import { Users, Search, Filter, Plus, Eye, Edit2, Trash2, Mail, Phone, MapPin, U
 import Modal from '../components/modals/Modal'
 import ConfirmModal from '../components/modals/ConfirmModal'
 import BoarderForm from '../components/forms/BoarderForm'
+import { showToast } from '../services/toast'
 
 const iconMap = {
   Users,
@@ -56,6 +57,8 @@ export default function BoardersPage() {
   const [editing, setEditing] = useState<string | null>(null)
   const [viewing, setViewing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string; message?: string } | null>(null)
+  const [page, setPage] = useState(1)
+  const pageSize = 10
   const [tab, setTab] = useState<'active'|'booked'|'checked-out'|'archived'>('active')
 
   const location = useLocation()
@@ -71,15 +74,18 @@ export default function BoardersPage() {
   }
 
   const matchesSearch = (boarder: typeof boarders[number]) => {
-    const q = query.toLowerCase()
+    const q = query.trim().toLowerCase()
     if (roomFilter) {
       const roomInfo = getBoarderRoomInfo(boarder, rooms)
       const roomMatch = boarder.room === roomFilter || roomInfo.roomNumber === roomFilter
       if (!roomMatch) return false
     }
     return (
-      boarder.name.toLowerCase().includes(q) ||
-      boarder.phone.toLowerCase().includes(q)
+      boarder.name?.toLowerCase().includes(q) ||
+      boarder.phone?.toLowerCase().includes(q) ||
+      boarder.email?.toLowerCase().includes(q) ||
+      boarder.id?.toLowerCase().includes(q) ||
+      String(boarder.room || '').toLowerCase().includes(q)
     )
   }
 
@@ -167,6 +173,10 @@ export default function BoardersPage() {
     }
   }, [location.state])
 
+  useEffect(() => {
+    setPage(1)
+  }, [tab, query, roomFilter])
+
   const currentView = boarders.find((b) => b.id === viewing)
   const viewRoom = currentView ? rooms.find((r) => r.id === currentView.room || r.roomNumber === currentView.room) : undefined
 
@@ -190,6 +200,30 @@ export default function BoardersPage() {
       : tab === 'checked-out'
         ? checkedOutBoarderList.length
         : archivedBoarderList.length
+
+  const activePageCount = Math.max(1, Math.ceil(activeBoarderList.length / pageSize))
+  const bookedPageCount = Math.max(1, Math.ceil(bookedBoarderList.length / pageSize))
+  const checkedOutPageCount = Math.max(1, Math.ceil(checkedOutBoarderList.length / pageSize))
+  const archivedPageCount = Math.max(1, Math.ceil(archivedBoarderList.length / pageSize))
+
+  const currentPageCount = tab === 'active'
+    ? activePageCount
+    : tab === 'booked'
+      ? bookedPageCount
+      : tab === 'checked-out'
+        ? checkedOutPageCount
+        : archivedPageCount
+
+  useEffect(() => {
+    if (page > currentPageCount) {
+      setPage(currentPageCount)
+    }
+  }, [currentPageCount, page])
+
+  const paginatedActiveBoarderList = activeBoarderList.slice((page - 1) * pageSize, page * pageSize)
+  const paginatedBookedBoarderList = bookedBoarderList.slice((page - 1) * pageSize, page * pageSize)
+  const paginatedCheckedOutBoarderList = checkedOutBoarderList.slice((page - 1) * pageSize, page * pageSize)
+  const paginatedArchivedBoarderList = archivedBoarderList.slice((page - 1) * pageSize, page * pageSize)
 
   const currentEditingBoarder = boarders.find((b) => b.id === editing)
   const handleEditSubmit = (b: Boarder, _currentPayment?: number) => {
@@ -289,11 +323,11 @@ export default function BoardersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {activeBoarderList.length === 0 ? (
+              {paginatedActiveBoarderList.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-400">No boarders found.</td>
                 </tr>
-              ) : activeBoarderList.map((boarder) => {
+              ) : paginatedActiveBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 const monthly = getBoarderRoomPrice(boarder, rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)) || (roomInfo.price ?? 0)
                 return (
@@ -352,18 +386,30 @@ export default function BoardersPage() {
           </table>
         </div>
 
-          <div className="mt-6 flex items-center justify-between border-t border-slate-800/50 pt-6">
-          <p className="text-sm text-slate-400">Showing {currentListLength ? 1 : 0} to {currentListLength} of {currentListLength} results</p>
-          <div className="flex gap-2">
-            <button className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50">
-              Previous
-            </button>
-            <button className="rounded-lg bg-indigo-500/20 px-4 py-2 text-sm font-medium text-indigo-400 border border-indigo-500/50">1</button>
-            <button className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800">
-              Next
-            </button>
+          <div className="mt-6 flex flex-col gap-4 border-t border-slate-800/50 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-400">Showing {activeBoarderList.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(page * pageSize, activeBoarderList.length)} of {activeBoarderList.length} results</p>
+            {activePageCount > 1 ? (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.max(1, page - 1))}
+                  disabled={page === 1}
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <span className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-slate-300">Page {page} of {activePageCount}</span>
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.min(activePageCount, page + 1))}
+                  disabled={page === activePageCount}
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            ) : null}
           </div>
-        </div>
       </section>
       )}
 
@@ -385,11 +431,11 @@ export default function BoardersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {bookedBoarderList.length === 0 ? (
+              {paginatedBookedBoarderList.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No bookings found.</td>
                 </tr>
-              ) : bookedBoarderList.map((boarder) => {
+              ) : paginatedBookedBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 return (
                   <tr key={boarder.id} className="transition hover:bg-slate-800/40">
@@ -445,11 +491,11 @@ export default function BoardersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {checkedOutBoarderList.length === 0 ? (
+              {paginatedCheckedOutBoarderList.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-400">No checked-out boarders.</td>
                 </tr>
-              ) : checkedOutBoarderList.map((boarder) => {
+              ) : paginatedCheckedOutBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 return (
                   <tr key={boarder.id} className="transition hover:bg-slate-800/40">
@@ -497,11 +543,11 @@ export default function BoardersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {archivedBoarderList.length === 0 ? (
+              {paginatedArchivedBoarderList.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No archived boarders.</td>
                 </tr>
-              ) : archivedBoarderList.map((boarder) => {
+              ) : paginatedArchivedBoarderList.map((boarder) => {
                 const roomInfo = getBoarderRoomInfo(boarder, rooms)
                 return (
                   <tr key={boarder.id} className="transition hover:bg-slate-800/40">
@@ -520,7 +566,7 @@ export default function BoardersPage() {
                         <button onClick={() => useBoarderStore.getState().restoreBoarder(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-emerald-400">
                           Restore
                         </button>
-                        <button onClick={() => { if (confirm(`${boarder.name} will be deleted permanently. Proceed?`)) removeBoarder(boarder.id) }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
+                        <button onClick={() => setConfirmDelete({ id: boarder.id, name: boarder.name })} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
                           Delete
                         </button>
                       </div>
@@ -540,9 +586,7 @@ export default function BoardersPage() {
           <BoarderForm onSubmit={(b, currentPayment = 0) => {
             const boarder = b
             addBoarder(boarder)
-
-            const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
-            const roomNumber = room?.roomNumber || String(b.room || 'ROOM')
+            showToast('Boarder added')
             const today = getTodayDate()
             const existingIds = payments.map((p) => p.id)
 
@@ -634,7 +678,7 @@ export default function BoardersPage() {
         )}
       </Modal>
 
-      <ConfirmModal open={!!confirmDelete} title="Delete boarder" message={confirmDelete?.message ?? confirmDelete?.name} onConfirm={() => { if (confirmDelete) { removeBoarder(confirmDelete.id); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
+      <ConfirmModal open={!!confirmDelete} title="Delete boarder" message={confirmDelete?.message ?? 'Are you sure?'} onConfirm={() => { if (confirmDelete) { removeBoarder(confirmDelete.id); setConfirmDelete(null); showToast('Delete completed') } }} onCancel={() => setConfirmDelete(null)} />
 
       <section className="grid gap-6 xl:grid-cols-3">
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">

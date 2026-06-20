@@ -44,6 +44,7 @@ export default function PaymentsPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [preselectedBoarder, setPreselectedBoarder] = useState<string | null>(null)
+  const [paymentPage, setPaymentPage] = useState(1)
 
   const dueMap = useMemo(() => {
     const map: Record<string, number> = {}
@@ -164,6 +165,7 @@ export default function PaymentsPage() {
 
 
   const paymentRecords = useMemo(() => {
+    if (!Array.isArray(payments)) return []
     return payments
       .map((payment) => {
         const boarder = boarders.find((b) => b.id === payment.boarderId)
@@ -176,13 +178,13 @@ export default function PaymentsPage() {
         return {
           id: payment.id,
           payment,
-          boarderName: boarder?.name || payment.guest,
-          roomNumber: roomInfo.roomNumber || payment.room,
-          status: payment.status,
+          boarderName: boarder?.name || payment.guest || 'Unknown',
+          roomNumber: roomInfo.roomNumber || payment.room || 'Unknown',
+          status: payment.status || 'Due',
           boarderStatus: derivedStatus,
           totalDue,
-          amount: payment.amount,
-          method: payment.method,
+          amount: payment.amount ?? 0,
+          method: payment.method || 'Cash',
           date: payment.date,
           dueDate: payment.dueDate,
           boarderId: payment.boarderId,
@@ -195,7 +197,7 @@ export default function PaymentsPage() {
 
   const filteredPayments = useMemo(() => {
     return paymentRecords.filter((rec) => {
-      const q = searchQuery.toLowerCase()
+      const q = searchQuery.trim().toLowerCase()
       if (searchQuery && !(`${rec.boarderName}`.toLowerCase().includes(q) || rec.roomNumber.toLowerCase().includes(q) || rec.id.toLowerCase().includes(q))) return false
       if (filterBoarder && rec.boarderId !== filterBoarder) return false
       if (filterMonth && !(rec.date?.slice(0, 7) === filterMonth)) return false
@@ -215,6 +217,16 @@ export default function PaymentsPage() {
     }
     setShowModal(false)
   }
+
+  const paymentPageSize = 10
+  const paymentPageCount = Math.max(1, Math.ceil(filteredPayments.length / paymentPageSize))
+  const paymentPageItems = filteredPayments.slice((paymentPage - 1) * paymentPageSize, paymentPage * paymentPageSize)
+
+  useEffect(() => {
+    if (paymentPage > paymentPageCount) {
+      setPaymentPage(paymentPageCount)
+    }
+  }, [paymentPageCount, paymentPage])
 
   return (
     <div className="space-y-8">
@@ -320,7 +332,11 @@ export default function PaymentsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {filteredPayments.map((rec) => (
+              {paymentPageItems.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-400">No payments found.</td>
+              </tr>
+            ) : paymentPageItems.map((rec) => (
                 <tr key={rec.id} className="transition hover:bg-slate-800/40">
                   <td className="px-4 py-4">
                     <span className="font-mono text-sm font-semibold text-sky-400">{rec.id}</span>
@@ -361,14 +377,24 @@ export default function PaymentsPage() {
         </div>
 
         {/* Pagination */}
-        <div className="mt-6 flex items-center justify-between border-t border-slate-800/50 pt-6">
-          <p className="text-sm text-slate-400">Showing 1 to {payments.length} of {payments.length} results</p>
+        <div className="mt-6 flex flex-col gap-3 border-t border-slate-800/50 pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-400">Showing {filteredPayments.length === 0 ? 0 : (paymentPage - 1) * pageSize + 1} to {Math.min(paymentPage * pageSize, filteredPayments.length)} of {filteredPayments.length} results</p>
           <div className="flex gap-2">
-            <button className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={() => setPaymentPage(Math.max(1, paymentPage - 1))}
+              disabled={paymentPage === 1}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+            >
               Previous
             </button>
-            <button className="rounded-lg bg-sky-500/20 px-4 py-2 text-sm font-medium text-sky-400 border border-sky-500/50">1</button>
-            <button className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800">
+            <span className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-slate-300">Page {paymentPage} of {paymentPageCount}</span>
+            <button
+              type="button"
+              onClick={() => setPaymentPage(Math.min(paymentPageCount, paymentPage + 1))}
+              disabled={paymentPage === paymentPageCount}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+            >
               Next
             </button>
           </div>

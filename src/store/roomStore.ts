@@ -51,6 +51,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         databaseAdapter.saveRooms(next)
         return { rooms: next }
       })
+      showToast('Room updated')
       logActivity({
         type: 'RoomUpdated',
         message: `Room updated: ${id}`,
@@ -61,6 +62,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       set((s) => {
         const next = s.rooms.filter((r) => r.id !== id && r.roomNumber !== id)
         databaseAdapter.saveRooms(next)
+        showToast('Delete completed')
         return { rooms: next }
       })
     },

@@ -87,6 +87,7 @@ export const usePaymentStore = create<PaymentState>((set, get) => {
         databaseAdapter.savePayments(next)
         return { payments: next }
       })
+      showToast('Payment saved')
       logActivity({
         type: 'PaymentReceived',
         message: `Payment received: ${p.amount} for ${p.guest}`,
@@ -107,10 +108,12 @@ export const usePaymentStore = create<PaymentState>((set, get) => {
         databaseAdapter.savePayments(next)
         return { payments: next }
       })
+      showToast('Payment saved')
     },
     removePayment: (id) => set((s) => {
       const next = s.payments.filter((x) => x.id !== id)
       databaseAdapter.savePayments(next)
+      showToast('Delete completed')
       return { payments: next }
     }),
     getPaymentsByBoarder: (boarderId) => get().payments.filter((p) => p.boarderId === boarderId),

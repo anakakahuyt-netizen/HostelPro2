@@ -52,7 +52,7 @@ export default function SettingsPage() {
 
     try {
       await importBackup(f)
-      showToast('Backup imported successfully')
+      showToast('Restore completed')
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to import backup')
     } finally {
@@ -86,7 +86,7 @@ export default function SettingsPage() {
   const handleExportBackup = () => {
     try {
       exportBackup()
-      showToast('Backup export started')
+      showToast('Backup created')
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to export backup')
     }
