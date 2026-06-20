@@ -11,7 +11,8 @@ import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
 import { useNavigate } from 'react-router-dom'
-import { getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus, isBoarderOccupyingBed, getRoomOccupants } from '../utils/boarderLedger'
+import { getRoomOccupants } from '../utils/boarderLedger'
+import { calculateDashboardKpis } from '../utils/dashboardKpi'
 
 const iconMap = {
   Users,
@@ -32,30 +33,9 @@ const DashboardPage = () => {
   // debug log removed
 
   const navigate = useNavigate()
-  const totalRooms = rooms.length
 
-  const derivedBoarderStatuses = useMemo(() => {
-    return boarders.map((b) => {
-      const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
-      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
-      const normalized = normalizeBoarderStatus(b.status)
-      const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(b, 0)
-      const { totalDue } = getBoarderTotals(b, paymentsFor, room, effectiveStatus)
-      return getDerivedBoarderStatus(b, totalDue)
-    })
-  }, [boarders, rooms, payments])
-
-  const occupiedRooms = rooms.filter((room) => {
-    const occupants = getRoomOccupants(room.id, boarders, payments, rooms)
-    return occupants.length > 0
-  }).length
-  const occupancyRate = totalRooms ? Math.round((occupiedRooms / totalRooms) * 100) : 0
-  const totalCapacity = rooms.reduce((s, r) => s + r.capacity, 0)
-  const totalOccupiedBeds = boarders.filter((boarder) => {
-    const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
-    return isBoarderOccupyingBed(boarder, paymentsFor)
-  }).length
-  const availableBeds = Math.max(0, totalCapacity - totalOccupiedBeds)
+  // Phase 14 Dashboard KPI calculations
+  const kpis = useMemo(() => calculateDashboardKpis(boarders, rooms, payments), [boarders, rooms, payments])
 
   const currentMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
 
@@ -65,60 +45,31 @@ const DashboardPage = () => {
     return { ...room, occupied: occupants.length }
   }), [rooms, boarders, payments])
 
-  // Monthly Revenue = sum of room prices of ACTIVE boarders
-  const monthlyRevenue = boarders.reduce((sum, boarder, index) => {
-    if (derivedBoarderStatuses[index] === 'ACTIVE') {
-      const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-      return sum + (room?.price || 0)
-    }
-    return sum
-  }, 0)
-
-  // Total Advance Balance = sum of all boarders' advance balances
-  const totalAdvanceBalance = boarders.reduce((sum, boarder) => {
-    const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
-    const normalized = normalizeBoarderStatus(boarder.status)
-    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
-    const { advance } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
-    return sum + advance
-  }, 0)
-
-  const boarderDueEntries = boarders.map((boarder) => {
-    const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
-    const normalized = normalizeBoarderStatus(boarder.status)
-    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
-    const { totalDue } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
-    const derived = getDerivedBoarderStatus(boarder, totalDue)
-    return { id: boarder.id, totalDue, derived }
-  })
-  const totalPendingDues = boarderDueEntries.reduce((s, e) => (e.derived === 'CLOSED' ? s : s + e.totalDue), 0)
-  const boardersWithDues = boarderDueEntries.filter((e) => e.derived !== 'CLOSED' && e.totalDue > 0).length
-
-  const activeBoarders = derivedBoarderStatuses.filter((status) => status === 'ACTIVE').length
-  const bookedBoarders = derivedBoarderStatuses.filter((status) => status === 'BOOKED').length
-  const checkedOutBoarders = derivedBoarderStatuses.filter((status) => status === 'CHECKED_OUT').length
-  const closedBoarders = derivedBoarderStatuses.filter((status) => status === 'CLOSED').length
+  // Calculate occupancy metrics
+  const occupiedRooms = rooms.filter((room) => {
+    const occupants = getRoomOccupants(room.id, boarders, payments, rooms)
+    return occupants.length > 0
+  }).length
+  const occupancyRate = kpis.totalRooms ? Math.round((occupiedRooms / kpis.totalRooms) * 100) : 0
 
   const metrics = [
-    { label: 'Total Boarders', value: String(boarders.length), change: `${activeBoarders} active`, icon: 'Users', accent: 'from-indigo-500 to-sky-500', path: '/boarders' },
-    { label: 'Active', value: String(activeBoarders), change: `${bookedBoarders} booked`, icon: 'Users', accent: 'from-emerald-500 to-teal-500', path: '/boarders', state: { section: 'active' } },
-    { label: 'Booked', value: String(bookedBoarders), change: `${checkedOutBoarders} checked out`, icon: 'Users', accent: 'from-cyan-500 to-blue-500', path: '/boarders', state: { section: 'booked' } },
-    { label: 'Checked-out', value: String(checkedOutBoarders), change: `${closedBoarders} archived`, icon: 'Users', accent: 'from-orange-500 to-red-500', path: '/boarders', state: { section: 'checked-out' } },
-    { label: 'Archived', value: String(closedBoarders), change: 'Closed', icon: 'Users', accent: 'from-slate-500 to-slate-400', path: '/boarders', state: { section: 'archived' } },
-    { label: 'Total Rooms', value: String(totalRooms), change: `${availableBeds} beds available`, icon: 'Home', accent: 'from-emerald-500 to-teal-500', path: '/rooms' },
+    { label: 'Total Boarders', value: String(kpis.totalBoarders), change: `${kpis.activeBoarders} active`, icon: 'Users', accent: 'from-indigo-500 to-sky-500', path: '/boarders' },
+    { label: 'Active', value: String(kpis.activeBoarders), change: `${kpis.bookedBoarders} booked`, icon: 'Users', accent: 'from-emerald-500 to-teal-500', path: '/boarders', state: { section: 'active' } },
+    { label: 'Booked', value: String(kpis.bookedBoarders), change: `${kpis.checkedOutBoarders} checked out`, icon: 'Users', accent: 'from-cyan-500 to-blue-500', path: '/boarders', state: { section: 'booked' } },
+    { label: 'Checked-out', value: String(kpis.checkedOutBoarders), change: `${kpis.closedBoarders} archived`, icon: 'Users', accent: 'from-orange-500 to-red-500', path: '/boarders', state: { section: 'checked-out' } },
+    { label: 'Archived', value: String(kpis.closedBoarders), change: 'Closed', icon: 'Users', accent: 'from-slate-500 to-slate-400', path: '/boarders', state: { section: 'archived' } },
+    { label: 'Total Rooms', value: String(kpis.totalRooms), change: `${kpis.availableSeats} seats available`, icon: 'Home', accent: 'from-emerald-500 to-teal-500', path: '/rooms' },
     { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${occupancyRate}% occupancy`, icon: 'Home', accent: 'from-amber-500 to-orange-500', path: '/rooms' },
-    { label: 'Available Rooms', value: String(totalRooms - occupiedRooms), change: 'Ready', icon: 'Home', accent: 'from-cyan-500 to-blue-500', path: '/rooms' },
-    { label: 'Monthly Revenue', value: `৳${monthlyRevenue}`, change: `${activeBoarders} active boarders`, icon: 'CreditCard', accent: 'from-orange-500 to-amber-500', path: '/boarders' },
-    { label: 'Total Due', value: `৳${totalPendingDues}`, change: `${boardersWithDues} boarders owed`, icon: 'Wallet', accent: 'from-cyan-500 to-blue-500', path: '/boarders' },
-    { label: 'Advance Balance', value: `৳${totalAdvanceBalance}`, change: 'Prepayments', icon: 'CreditCard', accent: 'from-violet-500 to-indigo-500', path: '/payments' },
+    { label: 'Available Rooms', value: String(kpis.totalRooms - occupiedRooms), change: 'Ready', icon: 'Home', accent: 'from-cyan-500 to-blue-500', path: '/rooms' },
+    { label: 'Expected Revenue', value: `৳${kpis.monthlyExpectedRevenue}`, change: `Active + Booked`, icon: 'CreditCard', accent: 'from-orange-500 to-amber-500', path: '/boarders' },
+    { label: 'Total Due', value: `৳${kpis.totalDueAmount}`, change: `${kpis.quickAlerts.boardersWithDue} boarders owed`, icon: 'Wallet', accent: 'from-cyan-500 to-blue-500', path: '/boarders' },
+    { label: 'Occupied Seats', value: `${kpis.occupiedSeats} / ${kpis.totalSeats}`, change: 'Current occupancy', icon: 'Home', accent: 'from-violet-500 to-indigo-500', path: '/rooms' },
   ]
 
   const stats = [
-    { title: 'Occupancy Rate', value: `${occupancyRate}%`, trend: `${occupiedRooms} of ${totalRooms} rooms` },
-    { title: 'Total Due', value: `৳${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
-    { title: 'Monthly Revenue', value: `৳${monthlyRevenue}`, trend: `${activeBoarders} active` },
+    { title: 'Occupancy Rate', value: `${occupancyRate}%`, trend: `${occupiedRooms} of ${kpis.totalRooms} rooms` },
+    { title: 'Total Due', value: `৳${kpis.totalDueAmount}`, trend: `${kpis.quickAlerts.boardersWithDue} boarders` },
+    { title: 'Expected Revenue', value: `৳${kpis.monthlyExpectedRevenue}`, trend: `${kpis.activeBoarders} active` },
   ]
 
   return (
@@ -140,7 +91,7 @@ const DashboardPage = () => {
             </div>
             <div className="rounded-3xl bg-slate-900/90 px-4 py-3 text-slate-300 shadow-inner shadow-slate-950/10">
               <p className="text-xs uppercase tracking-[0.32em] text-slate-500">Active alerts</p>
-              <p className="mt-2 text-sm font-semibold text-emerald-400">{boardersWithDues > 0 ? `${boardersWithDues} boarders with due` : 'All paid up'}</p>
+              <p className="mt-2 text-sm font-semibold text-emerald-400">{kpis.quickAlerts.boardersWithDue > 0 ? `${kpis.quickAlerts.boardersWithDue} boarders with due` : 'All paid up'}</p>
             </div>
           </div>
         </div>
@@ -206,7 +157,7 @@ const DashboardPage = () => {
                 No payments have been recorded yet.
               </div>
               ) : (
-              payments.slice(-5).reverse().map((payment) => (
+              kpis.recentPayments.slice(0, 5).map((payment) => (
                 <button key={payment.id} onClick={() => navigate('/payments', { state: { paymentId: payment.id } })} className="w-full text-left">
                   <div className="flex items-center justify-between gap-4 rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-4">
                     <div>
@@ -266,12 +217,12 @@ const DashboardPage = () => {
         <div className="mt-6 rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-slate-400">Occupied rooms</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{occupiedRooms}</p>
+              <p className="text-sm text-slate-400">Occupied seats</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{kpis.occupiedSeats}</p>
             </div>
             <div>
-              <p className="text-sm text-slate-400">Total rooms</p>
-              <p className="mt-2 text-2xl font-semibold text-white">{totalRooms}</p>
+              <p className="text-sm text-slate-400">Total seats</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{kpis.totalSeats}</p>
             </div>
             <div>
               <p className="text-sm text-slate-400">Occupancy rate</p>
@@ -324,10 +275,10 @@ const DashboardPage = () => {
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Monthly Revenue</p>
-                <p className="mt-2 text-3xl font-semibold text-white">৳{monthlyRevenue}</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Expected Revenue</p>
+                <p className="mt-2 text-3xl font-semibold text-white">৳{kpis.monthlyExpectedRevenue}</p>
               </div>
-              <span className="rounded-3xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-300">{activeBoarders} active</span>
+              <span className="rounded-3xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-300">{kpis.activeBoarders} active</span>
             </div>
             <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
               <div className="h-3 w-full rounded-full bg-linear-to-r from-indigo-500 to-cyan-400" />
@@ -337,9 +288,9 @@ const DashboardPage = () => {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Total Due</p>
-                <p className="mt-2 text-2xl font-semibold text-white">৳{totalPendingDues}</p>
+                <p className="mt-2 text-2xl font-semibold text-white">৳{kpis.totalDueAmount}</p>
               </div>
-              <span className="rounded-3xl bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-300">{boardersWithDues} boarders</span>
+              <span className="rounded-3xl bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-300">{kpis.quickAlerts.boardersWithDue} boarders</span>
             </div>
             <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
               <div className="h-3 w-5/6 rounded-full bg-linear-to-r from-emerald-500 to-lime-400" />
@@ -348,12 +299,12 @@ const DashboardPage = () => {
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/90 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Advance Balance</p>
-                <p className="mt-2 text-2xl font-semibold text-white">৳{totalAdvanceBalance}</p>
+                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Earned Revenue</p>
+                <p className="mt-2 text-2xl font-semibold text-white">৳{kpis.monthlyEarnedRevenue}</p>
               </div>
               {Wallet ? <Wallet className="h-5 w-5 text-slate-400" /> : null}
             </div>
-            <p className="mt-4 text-sm text-slate-400">{totalAdvanceBalance > 0 ? `Prepayments on account` : 'No advance balance'}</p>
+            <p className="mt-4 text-sm text-slate-400">{kpis.monthlyEarnedRevenue > 0 ? `Collections this month` : 'No collections yet'}</p>
           </div>
         </div>
       </div>
