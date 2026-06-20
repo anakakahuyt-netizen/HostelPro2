@@ -3,6 +3,19 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "build": {
+    "appId": "com.hostelpro2.app",
+    "asar": true,
+    "directories": {
+      "output": "build"
+    },
+    "files": [
+      "dist-electron/electron/**/*",
+      "dist/**/*",
+      "node_modules/**/*"
+    ]
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json && tsc -p tsconfig.electron.json && vite build && node scripts/fix-preload.mjs",
