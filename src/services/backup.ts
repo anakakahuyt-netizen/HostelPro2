@@ -4,11 +4,29 @@ import { usePaymentStore } from '../store/paymentStore'
 import { getTodayDate } from '../utils/dateUtils'
 import * as databaseAdapter from './database/databaseAdapter'
 
+const SETTINGS_KEY = 'hostelpro.currency'
+
+function getAppSettings() {
+  return {
+    currency: typeof window !== 'undefined' ? localStorage.getItem(SETTINGS_KEY) || 'BDT' : 'BDT',
+  }
+}
+
+function applyAppSettings(settings: unknown) {
+  if (!settings || typeof settings !== 'object') return
+  const appSettings = settings as Record<string, unknown>
+  const currency = appSettings.currency
+  if (typeof currency === 'string') {
+    localStorage.setItem(SETTINGS_KEY, currency)
+  }
+}
+
 export function exportBackup() {
   const data = {
     boarders: useBoarderStore.getState().boarders,
     rooms: useRoomStore.getState().rooms,
     payments: usePaymentStore.getState().payments,
+    settings: getAppSettings(),
   }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -42,6 +60,10 @@ export async function importBackup(file: File) {
   const boarders = backup.boarders as any[]
   const rooms = backup.rooms as any[]
   const payments = backup.payments as any[]
+
+  if (backup.settings) {
+    applyAppSettings(backup.settings)
+  }
 
   useBoarderStore.setState({ boarders })
   useRoomStore.setState({ rooms })

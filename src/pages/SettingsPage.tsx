@@ -44,6 +44,12 @@ export default function SettingsPage() {
       return
     }
 
+    const confirmed = window.confirm('Importing this backup will replace current boarders, rooms, payments, and currency settings. Continue?')
+    if (!confirmed) {
+      e.target.value = ''
+      return
+    }
+
     try {
       await importBackup(f)
       showToast('Backup imported successfully')
