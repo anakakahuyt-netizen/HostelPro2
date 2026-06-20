@@ -4,7 +4,7 @@
  * Only non-functional comments or type hints are permitted to preserve V1.2 stability.
  */
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { BarChart3, PieChart, TrendingUp, Download, Calendar, Filter, ArrowUp, ArrowDown } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useBoarderStore } from '../store/boarderStore'
@@ -13,6 +13,7 @@ import { usePaymentStore } from '../store/paymentStore'
 import { downloadCSV } from '../services/export'
 import { showToast } from '../services/toast'
 import { getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus, isBoarderOccupyingBed } from '../utils/boarderLedger'
+import { calculateDashboardKpis } from '../utils/dashboardKpi'
 import { getTodayDate } from '../utils/dateUtils'
 
 interface Report {
@@ -37,6 +38,8 @@ export default function ReportsPage() {
   const previousMonthKey = previousMonthDate.toISOString().slice(0, 7)
   const previousMonthLabel = previousMonthDate.toLocaleString('default', { month: 'long', year: 'numeric' })
 
+  const kpis = useMemo(() => calculateDashboardKpis(boarders, rooms, payments), [boarders, rooms, payments])
+
   const monthlyIncomeReport = payments.reduce<Record<string, number>>((acc, payment) => {
     const month = payment.date?.slice(0, 7) || nowMonth
     acc[month] = (acc[month] || 0) + payment.amount
@@ -50,6 +53,26 @@ export default function ReportsPage() {
     const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(b, 0)
     const { totalDue } = getBoarderTotals(b, paymentsFor, room, effectiveStatus)
     return { id: b.id, name: b.name, room: b.room, monthlyRent: room?.price || 0, due: totalDue }
+  })
+
+  const topDueBoarders = boarders
+    .map((b) => {
+      const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
+      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
+      const normalized = normalizeBoarderStatus(b.status)
+      const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(b, 0)
+      const { totalDue } = getBoarderTotals(b, paymentsFor, room, effectiveStatus)
+      return { ...b, due: totalDue }
+    })
+    .filter((b) => b.due > 0)
+    .sort((a, b) => b.due - a.due)
+    .slice(0, 5)
+
+  const upcomingActivations = boarders.filter((b) => {
+    const derivedStatus = getDerivedBoarderStatus(b, 0)
+    if (derivedStatus !== 'BOOKED') return false
+    const moveInMonth = (b.moveInMonth || b.checkIn || '').slice(0, 7)
+    return moveInMonth === new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().slice(0, 7)
   })
 
   const occupancyReport = rooms.map((r) => {
@@ -97,36 +120,9 @@ export default function ReportsPage() {
     },
   ]
 
-  const totalBoarders = boarders.length
-  const occupiedRooms = rooms.filter((room) => boarders.some((boarder) => {
-    const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
-    return isBoarderOccupyingBed(boarder, paymentsFor, room)
-  })).length
-  const availableRooms = rooms.filter((room) => {
-    const occupied = boarders.filter((boarder) => {
-      const paymentsFor = payments.filter((payment) => payment.boarderId === boarder.id)
-      return isBoarderOccupyingBed(boarder, paymentsFor, room)
-    }).length
-    return occupied < room.capacity
-  }).length
-
   const monthlyIncome = payments
     .filter((payment) => payment.date && payment.date.slice(0,7) === nowMonth)
     .reduce((sum, payment) => sum + payment.amount, 0)
-
-  const boarderDues = boarders.map((boarder) => {
-    const room = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
-    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
-    const normalized = normalizeBoarderStatus(boarder.status)
-    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
-    const { totalDue } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
-    return totalDue
-  })
-
-
-
-  const totalPendingDues = boarderDues.reduce((sum, due) => sum + due, 0)
-  const boardersWithDues = boarderDues.filter((due) => due > 0).length
 
   const monthlyRef = React.useRef<HTMLDivElement | null>(null)
   const pendingRef = React.useRef<HTMLDivElement | null>(null)
@@ -145,17 +141,17 @@ export default function ReportsPage() {
   }, [location.state])
 
   const summaryMetrics = [
-    { label: 'Total Boarders', value: String(totalBoarders), change: `${boardersWithDues} with dues`, icon: PieChart, accent: 'from-indigo-500 to-sky-500' },
-    { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${availableRooms} available`, icon: BarChart3, accent: 'from-emerald-500 to-teal-500' },
-    { label: 'Monthly Income', value: `৳${monthlyIncome}`, change: `${currentMonthLabel}`, icon: TrendingUp, accent: 'from-sky-500 to-indigo-500' },
-    { label: 'Pending Dues', value: `৳${totalPendingDues}`, change: `${boardersWithDues} boarders owed`, icon: Download, accent: 'from-violet-500 to-fuchsia-500' },
+    { label: 'Expected Revenue', value: `৳${kpis.monthlyExpectedRevenue}`, change: `Active + booked`, icon: TrendingUp, accent: 'from-sky-500 to-indigo-500' },
+    { label: 'Earned Revenue', value: `৳${kpis.monthlyEarnedRevenue}`, change: `Collections this month`, icon: BarChart3, accent: 'from-emerald-500 to-teal-500' },
+    { label: 'Total Due', value: `৳${kpis.totalDueAmount}`, change: `Active + checked-out`, icon: Download, accent: 'from-violet-500 to-fuchsia-500' },
+    { label: 'Occupied Seats', value: `${kpis.occupiedSeats} / ${kpis.totalSeats}`, change: `${kpis.availableSeats} available`, icon: PieChart, accent: 'from-indigo-500 to-sky-500' },
   ]
 
   const keyMetrics = [
-    { metric: 'Total Boarders', value: String(totalBoarders), trend: `${boardersWithDues} with dues` },
-    { metric: 'Occupied Rooms', value: String(occupiedRooms), trend: `${availableRooms} available` },
-    { metric: 'Monthly Income', value: `৳${monthlyIncome}`, trend: `${payments.filter((payment) => payment.date?.slice(0,7) === nowMonth).length} payments` },
-    { metric: 'Pending Dues', value: `৳${totalPendingDues}`, trend: `${boardersWithDues} boarders` },
+    { metric: 'Active Boarders', value: String(kpis.activeBoarders), trend: `${kpis.bookedBoarders} booked` },
+    { metric: 'Booked Boarders', value: String(kpis.bookedBoarders), trend: `${kpis.checkedOutBoarders} checked out` },
+    { metric: 'Checked-out Boarders', value: String(kpis.checkedOutBoarders), trend: `${kpis.closedBoarders} closed` },
+    { metric: 'Top Due Boarders', value: String(topDueBoarders.length), trend: `${topDueBoarders[0]?.name || 'None'} highest` },
   ]
 
   const previousIncome = monthlyIncomeReport[previousMonthKey] || 0
@@ -408,6 +404,151 @@ export default function ReportsPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <h3 className="text-lg font-semibold text-white">Collection Report</h3>
+            <TrendingUp className="h-5 w-5 text-slate-400" />
+          </div>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Active Collection</p>
+                <p className="font-semibold text-white">৳{kpis.monthlyEarnedRevenueActive}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Advance Collection</p>
+                <p className="font-semibold text-white">৳{kpis.monthlyEarnedRevenueAdvance}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Checked-out Due Collection</p>
+                <p className="font-semibold text-white">৳{kpis.monthlyEarnedRevenueCheckedOut}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Total Earned</p>
+                <p className="font-semibold text-white">৳{kpis.monthlyEarnedRevenue}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <h3 className="text-lg font-semibold text-white">Due Report</h3>
+            <Download className="h-5 w-5 text-slate-400" />
+          </div>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Active Due</p>
+                <p className="font-semibold text-white">৳{kpis.totalDueActive}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Checked-out Due</p>
+                <p className="font-semibold text-white">৳{kpis.totalDueCheckedOut}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Total Due</p>
+                <p className="font-semibold text-white">৳{kpis.totalDueAmount}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <h3 className="text-lg font-semibold text-white">Occupancy Report</h3>
+            <Calendar className="h-5 w-5 text-slate-400" />
+          </div>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Total Rooms</p>
+                <p className="font-semibold text-white">{kpis.totalRooms}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Total Seats</p>
+                <p className="font-semibold text-white">{kpis.totalSeats}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Occupied Seats</p>
+                <p className="font-semibold text-white">{kpis.occupiedSeats}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-300">Available Seats</p>
+                <p className="font-semibold text-white">{kpis.availableSeats}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <h3 className="text-lg font-semibold text-white">Top Due Boarders</h3>
+            <ArrowUp className="h-5 w-5 text-slate-400" />
+          </div>
+          <div className="space-y-3">
+            {topDueBoarders.length ? topDueBoarders.map((boarder) => (
+              <div key={boarder.id} className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{boarder.name}</p>
+                    <p className="text-xs text-slate-500">Room {boarder.room}</p>
+                  </div>
+                  <p className="font-semibold text-white">৳{boarder.due}</p>
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-6 text-center text-slate-500">
+                No outstanding dues found.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <h3 className="text-lg font-semibold text-white">Upcoming Activations</h3>
+          <Calendar className="h-5 w-5 text-slate-400" />
+        </div>
+        <div className="space-y-3">
+          {upcomingActivations.length ? upcomingActivations.map((boarder) => (
+            <div key={boarder.id} className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">{boarder.name}</p>
+                  <p className="text-xs text-slate-500">Room {boarder.room}</p>
+                </div>
+                <p className="text-sm font-semibold text-white">{(boarder.moveInMonth || boarder.checkIn || '').slice(0, 7)}</p>
+              </div>
+            </div>
+          )) : (
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-6 text-center text-slate-500">
+              No upcoming booked activations.
+            </div>
+          )}
         </div>
       </section>
     </div>
