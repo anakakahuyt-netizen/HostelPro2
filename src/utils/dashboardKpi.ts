@@ -126,7 +126,7 @@ export function calculateDashboardKpis(
     // Booked boarder activating this month
     if (derivedStatuses[b.id] === 'BOOKED') {
       const moveInMonth = parseMonth(b.moveInMonth || b.checkIn)
-      if (moveInMonth === nextMonthKey) {
+      if (moveInMonth === currentMonth) {
         monthlyExpectedRevenueBooked += roomPrice
       }
     }
