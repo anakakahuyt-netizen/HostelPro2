@@ -72,6 +72,7 @@ const DashboardPage = () => {
     { label: 'Occupied Rooms', value: String(occupiedRooms), change: `${occupancyRate}% occupancy`, icon: 'Home', accent: 'from-amber-500 to-orange-500', path: '/rooms' },
     { label: 'Available Rooms', value: String(kpis.totalRooms - occupiedRooms), change: 'Ready', icon: 'Home', accent: 'from-cyan-500 to-blue-500', path: '/rooms' },
     { label: 'Expected Revenue', value: `৳${kpis.monthlyExpectedRevenue}`, change: `Active + Booked`, icon: 'CreditCard', accent: 'from-orange-500 to-amber-500', path: '/boarders' },
+    { label: 'Earned Revenue', value: `৳${kpis.monthlyEarnedRevenue}`, change: `This month`, icon: 'Wallet', accent: 'from-emerald-500 to-teal-500', path: '/payments' },
     { label: 'Total Due', value: `৳${kpis.totalDueAmount}`, change: `${kpis.quickAlerts.boardersWithDue} boarders owed`, icon: 'Wallet', accent: 'from-cyan-500 to-blue-500', path: '/boarders' },
     { label: 'Occupied Seats', value: `${kpis.occupiedSeats} / ${kpis.totalSeats}`, change: 'Current occupancy', icon: 'Home', accent: 'from-violet-500 to-indigo-500', path: '/rooms' },
   ]

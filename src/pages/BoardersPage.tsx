@@ -193,14 +193,6 @@ export default function BoardersPage() {
     }
   }, [boarders])
 
-  const currentListLength = tab === 'active'
-    ? activeBoarderList.length
-    : tab === 'booked'
-      ? bookedBoarderList.length
-      : tab === 'checked-out'
-        ? checkedOutBoarderList.length
-        : archivedBoarderList.length
-
   const activePageCount = Math.max(1, Math.ceil(activeBoarderList.length / pageSize))
   const bookedPageCount = Math.max(1, Math.ceil(bookedBoarderList.length / pageSize))
   const checkedOutPageCount = Math.max(1, Math.ceil(checkedOutBoarderList.length / pageSize))
@@ -589,10 +581,12 @@ export default function BoardersPage() {
             showToast('Boarder added')
             const today = getTodayDate()
             const existingIds = payments.map((p) => p.id)
+            const roomInfo = rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+            const roomNumber = roomInfo?.roomNumber || String(boarder.room || 'ROOM')
 
             if (b.status === 'ACTIVE' && currentPayment > 0) {
               const paymentId = formatPaymentId(today, roomNumber, existingIds)
-              const monthlyRent = Number(b.monthlyRent || room?.price || 0)
+              const monthlyRent = Number(b.monthlyRent || roomInfo?.price || 0)
               const openingDue = Number(b.openingDue || 0)
               const totalCharges = monthlyRent + openingDue
               const paymentStatus = currentPayment >= totalCharges ? 'Paid' : 'Partial'

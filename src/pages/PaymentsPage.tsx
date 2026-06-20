@@ -378,7 +378,7 @@ export default function PaymentsPage() {
 
         {/* Pagination */}
         <div className="mt-6 flex flex-col gap-3 border-t border-slate-800/50 pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-slate-400">Showing {filteredPayments.length === 0 ? 0 : (paymentPage - 1) * pageSize + 1} to {Math.min(paymentPage * pageSize, filteredPayments.length)} of {filteredPayments.length} results</p>
+          <p className="text-sm text-slate-400">Showing {filteredPayments.length === 0 ? 0 : (paymentPage - 1) * paymentPageSize + 1} to {Math.min(paymentPage * paymentPageSize, filteredPayments.length)} of {filteredPayments.length} results</p>
           <div className="flex gap-2">
             <button
               type="button"
