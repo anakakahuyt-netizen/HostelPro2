@@ -13,6 +13,7 @@ interface BoarderState {
   addBoarder: (b: Boarder) => void
   updateBoarder: (id: string, patch: Partial<Boarder>) => void
   removeBoarder: (id: string) => void
+  restoreBoarder: (id: string) => void
 }
 
 export const useBoarderStore = create<BoarderState>((set, get) => {
@@ -85,7 +86,14 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
           const roomHistory = oldRoomNumber && !hasOldEntry
             ? [...existingHistory, { roomNumber: oldRoomNumber, price: oldRoomPrice }]
             : existingHistory
-          return { ...b, ...patch, roomHistory, archived }
+          // If we're archiving now and the boarder wasn't previously closed, record previous status in notes.
+          let notes = b.notes || ''
+          if (archived && normalizeBoarderStatus(b.status) !== 'CLOSED') {
+            if (!/__prevStatus=/.test(notes)) {
+              notes = `__prevStatus=${normalizeBoarderStatus(b.status)}\n${notes}`
+            }
+          }
+          return { ...b, ...patch, roomHistory, archived, notes }
         })
         databaseAdapter.saveBoarders(next)
         return { boarders: next }
@@ -116,6 +124,37 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
         const roomsApi = useRoomStore.getState()
         const room = roomsApi.rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
         if (room && active) roomsApi.updateRoom(room.id, { occupied: Math.max(0, room.occupied - 1) })
+      }
+    },
+    restoreBoarder: (id) => {
+      const boarder = get().boarders.find((b) => b.id === id)
+      if (!boarder) return
+      // If notes contain a previous status marker, use it. Marker format: __prevStatus=STATUS\n
+      const notes = boarder.notes || ''
+      const match = notes.match(/__prevStatus=(ACTIVE|BOOKED|CHECKED_OUT|CLOSED)\n?/) 
+      const prevStatus = match ? match[1] : undefined
+      const newStatus = prevStatus || 'ACTIVE'
+      const cleanedNotes = notes.replace(/__prevStatus=(?:ACTIVE|BOOKED|CHECKED_OUT|CLOSED)\n?/, '')
+
+      const roomsApi = useRoomStore.getState()
+      const room = roomsApi.rooms.find((r) => r.id === boarder.room || r.roomNumber === boarder.room)
+      const wasActive = normalizeBoarderStatus(boarder.status) === 'ACTIVE'
+      const willBeActive = normalizeBoarderStatus(newStatus) === 'ACTIVE'
+
+      set((s) => {
+        const next = s.boarders.map((b) => (b.id === id ? { ...b, status: newStatus as any, archived: false, notes: cleanedNotes } : b))
+        databaseAdapter.saveBoarders(next)
+        return { boarders: next }
+      })
+
+      // adjust room occupancy if needed
+      if (room) {
+        if (!wasActive && willBeActive) {
+          roomsApi.updateRoom(room.id, { occupied: Math.min(room.capacity, room.occupied + 1) })
+        }
+        if (wasActive && !willBeActive) {
+          roomsApi.updateRoom(room.id, { occupied: Math.max(0, room.occupied - 1) })
+        }
       }
     },
   }

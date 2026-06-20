@@ -53,7 +53,8 @@ export default function BoarderForm({ initial, onSubmit }: { initial?: Partial<B
       room: state.room || '',
       monthlyRent,
       status,
-      checkIn: state.checkIn || today,
+      // BOOKED boarders must not have check-in auto-filled
+      checkIn: status === 'BOOKED' ? (state.checkIn || '') : (state.checkIn || today),
       checkOut: state.checkOut || '',
       moveInMonth: state.moveInMonth || '',
       openingDue,

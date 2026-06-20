@@ -62,6 +62,7 @@ export function getDerivedBoarderStatus(boarder: Boarder, totalDue: number): Nor
   const currentMonth = monthKey(new Date())
   const moveInMonth = parseMonth(boarder.moveInMonth || boarder.checkIn)
   const checkoutMonth = parseMonth(boarder.checkoutMonth || boarder.checkOut)
+  const todayKey = new Date().toISOString().slice(0, 10)
 
   if (normalized === 'BOOKED') {
     if (moveInMonth && moveInMonth <= currentMonth) return 'ACTIVE'
@@ -69,6 +70,16 @@ export function getDerivedBoarderStatus(boarder: Boarder, totalDue: number): Nor
   }
 
   if (normalized === 'ACTIVE') {
+    // If boarder has an explicit checkout date (YYYY-MM-DD) use day-level comparison.
+    if (boarder.checkOut && /^\d{4}-\d{2}-\d{2}$/.test(boarder.checkOut)) {
+      if (boarder.checkOut <= todayKey) {
+        if (totalDue <= 0) return 'CLOSED'
+        return 'CHECKED_OUT'
+      }
+      return 'ACTIVE'
+    }
+
+    // Fallback to month-level comparison when only month is provided.
     if (checkoutMonth && checkoutMonth <= currentMonth) {
       if (totalDue <= 0) return 'CLOSED'
       return 'CHECKED_OUT'
@@ -77,6 +88,14 @@ export function getDerivedBoarderStatus(boarder: Boarder, totalDue: number): Nor
   }
 
   if (normalized === 'CHECKED_OUT') {
+    // If a checkout date is in the future, honor the date and keep the boarder ACTIVE
+    // until that date arrives (current date drives lifecycle).
+    if (boarder.checkOut && /^\d{4}-\d{2}-\d{2}$/.test(boarder.checkOut)) {
+      if (boarder.checkOut > todayKey) return 'ACTIVE'
+    } else if (checkoutMonth) {
+      if (checkoutMonth > currentMonth) return 'ACTIVE'
+    }
+
     if (totalDue <= 0) return 'CLOSED'
     return 'CHECKED_OUT'
   }
@@ -216,17 +235,24 @@ export function isBoarderOccupyingBed(boarder: Boarder, payments: Payment[], roo
   const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
   const { totalDue } = getBoarderTotals(boarder, payments, room, effectiveStatus)
   const derived = getDerivedBoarderStatus(boarder, totalDue)
-
+  // ACTIVE boarders occupy beds
   if (derived === 'ACTIVE') return true
 
-  if (derived === 'BOOKED') {
-    const moveInMonth = parseMonth(boarder.moveInMonth || boarder.checkIn)
-    return moveInMonth !== '' && nextMonth(referenceMonth) === moveInMonth
-  }
+  // BOOKED boarders reserve a room but do NOT occupy (do not count towards occupancy)
+  if (derived === 'BOOKED') return false
 
+  // CHECKED_OUT: remain occupying until checkout date arrives (day-level preferred,
+  // fallback to month-level). After the checkout date passes they no longer occupy.
   if (derived === 'CHECKED_OUT') {
+    if (boarder.checkOut && /^\d{4}-\d{2}-\d{2}$/.test(boarder.checkOut)) {
+      const today = new Date().toISOString().slice(0, 10)
+      return today < boarder.checkOut
+    }
     const checkoutMonth = parseMonth(boarder.checkoutMonth || boarder.checkOut)
-    return checkoutMonth !== '' && nextMonth(referenceMonth) === checkoutMonth
+    if (checkoutMonth) {
+      return compareMonth(referenceMonth, checkoutMonth) < 0
+    }
+    return false
   }
 
   return false
@@ -243,6 +269,33 @@ export function getRoomOccupants(roomId: string | number, boarders: Boarder[], p
     const room = rooms.find((r) => r.id === roomId || r.roomNumber === roomId)
     const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
     return isBoarderOccupyingBed(boarder, paymentsFor, room, referenceMonth)
+  })
+}
+
+/**
+ * Get all residents for a room for display in resident lists.
+ * Includes ACTIVE boarders, BOOKED reservations, and CHECKED_OUT boarders
+ * whose checkout date is still in the future (they are still present until checkout).
+ * This intentionally differs from `getRoomOccupants` which is a seat-occupancy
+ * focused helper (used for counting occupied beds).
+ */
+export function getRoomResidents(roomId: string | number, boarders: Boarder[], payments: Payment[], rooms: Room[], referenceMonth = monthKey(new Date())): Boarder[] {
+  return boarders.filter((boarder) => {
+    if (boarder.room !== roomId) return false
+    const room = rooms.find((r) => r.id === roomId || r.roomNumber === roomId)
+    const paymentsFor = payments.filter((p) => p.boarderId === boarder.id)
+    const normalized = normalizeBoarderStatus(boarder.status)
+    const effectiveStatus = normalized === 'CHECKED_OUT' ? 'CHECKED_OUT' : getDerivedBoarderStatus(boarder, 0)
+    const { totalDue } = getBoarderTotals(boarder, paymentsFor, room, effectiveStatus)
+    const derived = getDerivedBoarderStatus(boarder, totalDue)
+
+    if (derived === 'ACTIVE') return true
+    if (derived === 'BOOKED') return true
+    if (derived === 'CHECKED_OUT') {
+      // include future checkouts (still present until checkout date)
+      return isBoarderOccupyingBed(boarder, paymentsFor, room, referenceMonth)
+    }
+    return false
   })
 }
 

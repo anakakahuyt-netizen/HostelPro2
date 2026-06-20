@@ -517,7 +517,7 @@ export default function BoardersPage() {
                     })()}</td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
-                        <button onClick={() => updateBoarder(boarder.id, { status: 'ACTIVE', archived: false })} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-emerald-400">
+                        <button onClick={() => useBoarderStore.getState().restoreBoarder(boarder.id)} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-emerald-400">
                           Restore
                         </button>
                         <button onClick={() => { if (confirm(`${boarder.name} will be deleted permanently. Proceed?`)) removeBoarder(boarder.id) }} className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">

@@ -8,7 +8,7 @@ import { Building2, Search, Filter, Plus, Eye, Edit2, Trash2, TrendingUp } from 
 import { useRoomStore } from '../store/roomStore'
 import { useBoarderStore } from '../store/boarderStore'
 import { usePaymentStore } from '../store/paymentStore'
-import { getRoomOccupants } from '../utils/boarderLedger'
+import { getRoomResidents, isBoarderOccupyingBed, getDerivedBoarderStatus, getBoarderTotals } from '../utils/boarderLedger'
 import { getTodayDate } from '../utils/dateUtils'
 import Modal from '../components/modals/Modal'
 import ConfirmModal from '../components/modals/ConfirmModal'
@@ -63,8 +63,10 @@ export default function RoomsPage() {
 
   const roomsWithCounts = useMemo(() => rooms
     .map((r) => {
-      const occupants = getRoomOccupants(r.id, boarders, payments, rooms)
-      const occupied = occupants.length
+      // Residents list includes ACTIVE, BOOKED, and future CHECKED_OUT
+      const occupants = getRoomResidents(r.id, boarders, payments, rooms)
+      // Occupied seats count uses only ACTIVE + future CHECKED_OUT via isBoarderOccupyingBed
+      const occupied = boarders.filter((b) => (b.room === r.id || b.room === r.roomNumber) && isBoarderOccupyingBed(b, payments.filter((p) => p.boarderId === b.id), r)).length
       const available = Math.max(0, r.capacity - occupied)
       const occupancyStatus = r.status === 'Maintenance'
         ? 'Maintenance'
@@ -91,8 +93,7 @@ export default function RoomsPage() {
     return acc
   }, {})
   const floorTotals = rooms.reduce<Record<string, { occupied: number; capacity: number }>>((acc, room) => {
-    const occupants = getRoomOccupants(room.id, boarders, payments, rooms)
-    const occupied = occupants.length
+    const occupied = boarders.filter((b) => (b.room === room.id || b.room === room.roomNumber) && isBoarderOccupyingBed(b, payments.filter((p) => p.boarderId === b.id), room)).length
     const key = `Floor ${room.floor}`
     acc[key] = {
       occupied: (acc[key]?.occupied || 0) + occupied,
@@ -234,11 +235,17 @@ export default function RoomsPage() {
                 <div className="mb-6">
                   <p className="text-xs uppercase tracking-[0.28em] text-slate-500 mb-2">Residents</p>
                   <div className="flex flex-wrap gap-2">
-                    {room.occupants.map((b) => (
-                      <span key={b.id} className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-300">
-                        {b.name.split(' ')[0]}
-                      </span>
-                    ))}
+                    {room.occupants.map((b) => {
+                      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
+                      const { totalDue } = getBoarderTotals(b, paymentsFor, room)
+                      const derived = getDerivedBoarderStatus(b, totalDue)
+                      return (
+                        <span key={b.id} className="inline-flex items-center gap-2 rounded-full bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-300">
+                          <span className="font-semibold">{b.name.split(' ')[0]}</span>
+                          <span className="rounded-full bg-slate-700 px-2 py-0.5 text-[10px]">{derived}</span>
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
               )}
