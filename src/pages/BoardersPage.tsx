@@ -10,6 +10,8 @@ import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
 import { usePaymentStore } from '../store/paymentStore'
 import type { NormalizedBoarderStatus } from '../utils/boarderLedger'
+import type { Boarder } from '../types'
+import { getTodayDate } from '../utils/dateUtils'
 import { getBoarderRoomInfo, getBoarderRoomPrice, getBoarderTotals, getDerivedBoarderStatus, normalizeBoarderStatus } from '../utils/boarderLedger'
 import formatCurrency from '../utils/formatCurrency'
 import { Users, Search, Filter, Plus, Eye, Edit2, Trash2, Mail, Phone, MapPin, UserCheck } from 'lucide-react'
@@ -22,6 +24,23 @@ const iconMap = {
   UserCheck,
 }
 
+function formatPaymentId(date: string, roomNumber: string, existingIds: string[]): string {
+  const parsed = new Date(date || '')
+  const sourceDate = Number.isNaN(parsed.getTime()) ? new Date() : parsed
+  const day = String(sourceDate.getDate()).padStart(2, '0')
+  const month = String(sourceDate.getMonth() + 1).padStart(2, '0')
+  const year = String(sourceDate.getFullYear())
+  const normalizedRoom = roomNumber.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'ROOM'
+  const baseId = `PAY-${day}${month}${year}${normalizedRoom}`
+  let candidate = baseId
+  let suffix = 1
+  while (existingIds.includes(candidate)) {
+    suffix += 1
+    candidate = `${baseId}-${suffix}`
+  }
+  return candidate
+}
+
 export default function BoardersPage() {
   const boarders = useBoarderStore((state) => state.boarders)
   const addBoarder = useBoarderStore((s) => s.addBoarder)
@@ -29,6 +48,7 @@ export default function BoardersPage() {
   const removeBoarder = useBoarderStore((s) => s.removeBoarder)
   const rooms = useRoomStore((s) => s.rooms)
   const payments = usePaymentStore((s) => s.payments)
+  const addPayment = usePaymentStore((s) => s.addPayment)
 
   const [query, setQuery] = useState('')
   const [roomFilter, setRoomFilter] = useState('')
@@ -170,6 +190,12 @@ export default function BoardersPage() {
       : tab === 'checked-out'
         ? checkedOutBoarderList.length
         : archivedBoarderList.length
+
+  const currentEditingBoarder = boarders.find((b) => b.id === editing)
+  const handleEditSubmit = (b: Boarder, _currentPayment?: number) => {
+    updateBoarder(b.id, b)
+    setEditing(null)
+  }
 
   return (
     <div className="space-y-8">
@@ -511,14 +537,64 @@ export default function BoardersPage() {
       <Modal open={openAdd} onClose={() => setOpenAdd(false)}>
         <h3 className="text-lg font-semibold text-white">Add Boarder</h3>
         <div className="mt-4">
-          <BoarderForm onSubmit={(b) => { addBoarder(b); setOpenAdd(false) }} />
+          <BoarderForm onSubmit={(b, currentPayment = 0) => {
+            const boarder = b
+            addBoarder(boarder)
+
+            const room = rooms.find((r) => r.id === b.room || r.roomNumber === b.room)
+            const roomNumber = room?.roomNumber || String(b.room || 'ROOM')
+            const today = getTodayDate()
+            const existingIds = payments.map((p) => p.id)
+
+            if (b.status === 'ACTIVE' && currentPayment > 0) {
+              const paymentId = formatPaymentId(today, roomNumber, existingIds)
+              const monthlyRent = Number(b.monthlyRent || room?.price || 0)
+              const openingDue = Number(b.openingDue || 0)
+              const totalCharges = monthlyRent + openingDue
+              const paymentStatus = currentPayment >= totalCharges ? 'Paid' : 'Partial'
+
+              addPayment({
+                id: paymentId,
+                boarderId: boarder.id,
+                guest: boarder.name,
+                room: roomNumber,
+                amount: currentPayment,
+                date: today,
+                dueDate: '',
+                status: paymentStatus,
+                method: 'Cash',
+                notes: 'Initial payment',
+              })
+            }
+
+            if (b.status === 'BOOKED') {
+              const advanceAmount = Number(b.advanceBalance || 0)
+              if (advanceAmount > 0) {
+                const paymentId = formatPaymentId(today, roomNumber, existingIds)
+                addPayment({
+                  id: paymentId,
+                  boarderId: boarder.id,
+                  guest: boarder.name,
+                  room: roomNumber,
+                  amount: advanceAmount,
+                  date: today,
+                  dueDate: '',
+                  status: 'Advance',
+                  method: 'Advance Payment',
+                  notes: 'Advance payment for activation',
+                })
+              }
+            }
+
+            setOpenAdd(false)
+          }} />
         </div>
       </Modal>
 
       <Modal open={!!editing} onClose={() => setEditing(null)}>
         <h3 className="text-lg font-semibold text-white">Edit Boarder</h3>
         <div className="mt-4">
-          <BoarderForm initial={boarders.find((b) => b.id === editing) || undefined} onSubmit={(b) => { updateBoarder(b.id, b); setEditing(null) }} />
+          <BoarderForm initial={currentEditingBoarder} onSubmit={handleEditSubmit} />
         </div>
       </Modal>
 
