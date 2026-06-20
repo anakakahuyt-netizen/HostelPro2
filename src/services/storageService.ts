@@ -9,7 +9,7 @@ export function getBoarders(): Boarder[] {
     const raw = localStorage.getItem(BOARDER_KEY)
     return raw ? JSON.parse(raw) : []
   } catch (err) {
-    console.error('getBoarders error', err)
+    console.error('[storageService] getBoarders error', err)
     return []
   }
 }

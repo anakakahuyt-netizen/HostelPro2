@@ -1,4 +1,6 @@
-export type BoarderStatus = 'Active' | 'Pending' | 'Checked-out'
+export type BoarderStatus = 'ACTIVE' | 'BOOKED' | 'CHECKED_OUT' | 'CLOSED'
+
+export type BoarderRoomHistoryEntry = { roomNumber: string; price: number } | string
 
 export interface Boarder {
   id: string
@@ -6,10 +8,22 @@ export interface Boarder {
   email: string
   phone: string
   room: string
-  monthlyRent: number
+  monthlyRent?: number
   status: BoarderStatus
   checkIn: string
   checkOut: string
+  moveInMonth?: string
+  checkoutMonth?: string
+  advanceAmount?: number
+  // Persisted opening and current month dues from CSV import
+  openingDue?: number
+  currentMonthDue?: number
+  // Persisted advance balance (new preferred field). Backwards-compatible with `advanceAmount`.
+  advanceBalance?: number
+  // Optional free-form notes for the boarder
+  notes?: string
+  roomHistory?: BoarderRoomHistoryEntry[]
+  archived?: boolean
 }
 
 export type RoomStatus = 'Available' | 'Occupied' | 'Limited' | 'Maintenance'
@@ -27,7 +41,7 @@ export interface Room {
   amenities: string[]
 }
 
-export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial' | 'Due'
+export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Partial' | 'Due' | 'Advance'
 
 export interface Payment {
   id: string

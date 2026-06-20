@@ -1,17 +1,38 @@
-import { Building2, Search, Filter, Plus, Eye, Edit2, Trash2, Zap, Users, TrendingUp } from 'lucide-react'
+/*
+ * ARCHITECTURE LOCK - HostelPro V1.2
+ * Room card UI and related display logic are locked. Do not change pricing rules here.
+ * Allowed: explanatory comments or type-level guards only.
+ */
+
+import { Building2, Search, Filter, Plus, Eye, Edit2, Trash2, TrendingUp } from 'lucide-react'
 import { useRoomStore } from '../store/roomStore'
 import { useBoarderStore } from '../store/boarderStore'
+import { usePaymentStore } from '../store/paymentStore'
+import { getRoomResidents, isBoarderOccupyingBed, getDerivedBoarderStatus, getBoarderTotals } from '../utils/boarderLedger'
+import { getTodayDate } from '../utils/dateUtils'
 import Modal from '../components/modals/Modal'
 import ConfirmModal from '../components/modals/ConfirmModal'
 import RoomForm from '../components/forms/RoomForm'
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { Room } from '../types'
 
-const iconMap = {
-  Building2,
-  Users,
-  Zap,
-  TrendingUp,
+const getBuildingName = (roomNumber: string): string => {
+  const digits = Number(String(roomNumber).replace(/[^0-9]/g, ''))
+  if (!digits) return ''
+  if (digits >= 101 && digits <= 305) return 'Jubayer Mess Old'
+  if (digits >= 1001 && digits <= 3007) return 'Jubayer Mess New'
+  return ''
 }
+
+const normalizeRoomNumber = (roomNumber: string): string => {
+  const raw = String(roomNumber || '').trim()
+  if (!raw) return ''
+  if (/^R-/i.test(raw)) return raw.toUpperCase()
+  return `R-${raw}`
+}
+
+const getDisplayRoomNumber = (roomNumber: string): string => normalizeRoomNumber(roomNumber)
 
 export default function RoomsPage() {
   const statusStyles: Record<string, string> = {
@@ -27,19 +48,25 @@ export default function RoomsPage() {
   const addRoom = useRoomStore((s) => s.addRoom)
   const updateRoom = useRoomStore((s) => s.updateRoom)
   const removeRoom = useRoomStore((s) => s.removeRoom)
+  const updateBoarder = useBoarderStore((s) => s.updateBoarder)
   const boarders = useBoarderStore((s) => s.boarders)
+  const payments = usePaymentStore((s) => s.payments)
 
   const [openAdd, setOpenAdd] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [viewing, setViewing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [deleteWarning, setDeleteWarning] = useState<string | null>(null)
+  const [roomDeleteTarget, setRoomDeleteTarget] = useState<Room | null>(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const roomsGridRef = useMemo(() => ({ current: null as HTMLDivElement | null }), []) as any
 
   const roomsWithCounts = useMemo(() => rooms
     .map((r) => {
-      const occupied = boarders.filter((b) => b.room === r.id || b.room === r.roomNumber).length
+      // Residents list includes ACTIVE, BOOKED, and future CHECKED_OUT
+      const occupants = getRoomResidents(r.id, boarders, payments, rooms)
+      // Occupied seats count uses only ACTIVE + future CHECKED_OUT via isBoarderOccupyingBed
+      const occupied = boarders.filter((b) => (b.room === r.id || b.room === r.roomNumber) && isBoarderOccupyingBed(b, payments.filter((p) => p.boarderId === b.id), r)).length
       const available = Math.max(0, r.capacity - occupied)
       const occupancyStatus = r.status === 'Maintenance'
         ? 'Maintenance'
@@ -48,14 +75,15 @@ export default function RoomsPage() {
         : occupied >= r.capacity
         ? 'Full'
         : 'Available'
-      return { ...r, occupied, available, occupancyStatus }
+      return { ...r, occupied, occupants, available, occupancyStatus }
     })
     .filter((room) =>
       room.roomNumber.toLowerCase().includes(query.toLowerCase()) &&
       (!statusFilter || room.occupancyStatus === statusFilter)
     ),
-  [rooms, boarders, query, statusFilter])
+  [rooms, boarders, payments, query, statusFilter])
 
+  const navigate = useNavigate()
   const total = roomsWithCounts.length
   const occupiedCount = roomsWithCounts.reduce((c, r) => c + (r.occupied > 0 ? 1 : 0), 0)
   const availableCount = roomsWithCounts.filter((r) => r.available > 0).length
@@ -65,7 +93,7 @@ export default function RoomsPage() {
     return acc
   }, {})
   const floorTotals = rooms.reduce<Record<string, { occupied: number; capacity: number }>>((acc, room) => {
-    const occupied = boarders.filter((b) => b.room === room.id || b.room === room.roomNumber).length
+    const occupied = boarders.filter((b) => (b.room === room.id || b.room === room.roomNumber) && isBoarderOccupyingBed(b, payments.filter((p) => p.boarderId === b.id), room)).length
     const key = `Floor ${room.floor}`
     acc[key] = {
       occupied: (acc[key]?.occupied || 0) + occupied,
@@ -76,7 +104,7 @@ export default function RoomsPage() {
   const floorOccupancy = Object.fromEntries(
     Object.entries(floorTotals).map(([floor, totals]) => [floor, totals.capacity ? (totals.occupied / totals.capacity) * 100 : 0])
   )
-  const monthlyRevenue = rooms.reduce((sum, room) => sum + room.price * room.occupied, 0)
+  const monthlyRevenue = roomsWithCounts.reduce((sum, room) => sum + room.price * (room.occupied || 0), 0)
   const averageRevenuePerRoom = occupiedCount ? monthlyRevenue / occupiedCount : 0
 
   return (
@@ -98,16 +126,33 @@ export default function RoomsPage() {
         {/* Stats grid */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            { label: 'Total Rooms', value: String(total), change: 'All active', icon: 'Building2', accent: 'from-sky-500 to-indigo-500' },
-            { label: 'Occupied', value: String(occupiedCount), change: `${Math.round((occupiedCount / Math.max(total, 1)) * 100)}%`, icon: 'Users', accent: 'from-emerald-500 to-teal-500' },
-            { label: 'Available', value: String(availableCount), change: 'Ready', icon: 'Building2', accent: 'from-amber-500 to-orange-500' },
-            { label: 'Maintenance', value: String(maintenanceCount), change: 'Check', icon: 'Zap', accent: 'from-violet-500 to-fuchsia-500' },
+            { label: 'Total Rooms', value: String(total), change: 'All active', key: 'total' },
+            { label: 'Occupied', value: String(occupiedCount), change: `${Math.round((occupiedCount / Math.max(total, 1)) * 100)}%`, key: 'occupied' },
+            { label: 'Available', value: String(availableCount), change: 'Ready', key: 'available' },
+            { label: 'Maintenance', value: String(maintenanceCount), change: 'Check', key: 'maintenance' },
           ].map((stat) => {
-            const Icon = iconMap[stat.icon as keyof typeof iconMap]
+            const onClick = () => {
+              if (stat.key === 'total') {
+                setStatusFilter('')
+                roomsGridRef.current?.scrollIntoView({ behavior: 'smooth' })
+              } else if (stat.key === 'occupied') {
+                setStatusFilter('')
+                const el = roomsGridRef.current?.querySelector('[data-occupied="true"]')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              } else if (stat.key === 'available') {
+                setStatusFilter('')
+                const el = roomsGridRef.current?.querySelector('[data-available="true"]')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              } else if (stat.key === 'maintenance') {
+                setStatusFilter('Maintenance')
+                const el = roomsGridRef.current?.querySelector('[data-status="Maintenance"]')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }
+            }
             return (
-              <div key={stat.label} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 shadow-lg shadow-slate-950/20">
-                <div className={`inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-linear-to-br ${stat.accent} text-white shadow-lg shadow-slate-950/30`}>
-                  <Icon className="h-5 w-5" />
+              <button key={stat.label} onClick={onClick} className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 text-left shadow-lg shadow-slate-950/20">
+                <div className={`inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-linear-to-br from-sky-500 to-indigo-500 text-white shadow-lg shadow-slate-950/30`}>
+                  <Building2 className="h-5 w-5" />
                 </div>
                 <p className="mt-5 text-sm uppercase tracking-[0.32em] text-slate-500">{stat.label}</p>
                 <div className="mt-3 flex items-end justify-between gap-4">
@@ -116,7 +161,7 @@ export default function RoomsPage() {
                     {stat.change}
                   </span>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -150,81 +195,104 @@ export default function RoomsPage() {
       </section>
 
       {/* Rooms grid */}
-      <section className="grid gap-6 lg:grid-cols-2">
-        {roomsWithCounts.map((room) => (
-          <div key={room.id} className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
-            <div className="flex items-start justify-between gap-4 mb-6">
-              <div>
-                <p className="text-xs uppercase tracking-[0.28em] text-slate-500">{room.id}</p>
-                <h3 className="mt-2 text-xl font-semibold text-white">{room.name}</h3>
-                <p className="mt-1 text-sm text-slate-400">{room.type} Room • Floor {room.floor}</p>
+      <section className="grid gap-6 lg:grid-cols-2" ref={(el) => { roomsGridRef.current = el }}>
+        {roomsWithCounts.length === 0 ? (
+          <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20 col-span-2 text-center text-sm text-slate-400">No rooms found.</div>
+        ) : (
+          roomsWithCounts.map((room) => (
+            <div key={room.id} data-status={room.occupancyStatus} data-occupied={room.occupied>0} data-available={room.available>0} className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
+              <div className="flex items-start justify-between gap-4 mb-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Room</p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">{getDisplayRoomNumber(room.roomNumber)}</h3>
+                  <p className="mt-1 text-sm text-slate-400">{room.name || getBuildingName(room.roomNumber) || `${room.type} Room • Floor ${room.floor}`}</p>
+                </div>
+                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[room.occupancyStatus]}`}>
+                  {room.occupancyStatus}
+                </span>
               </div>
-              <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[room.occupancyStatus]}`}>
-                {room.occupancyStatus}
-              </span>
-            </div>
 
-            <div className="space-y-4 mb-6">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-slate-400">Occupancy</p>
-                <p className="text-lg font-semibold text-white">{room.occupied} / {room.capacity}</p>
+              <div className="space-y-4 mb-6">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-slate-400">Occupancy</p>
+                  <p className="text-lg font-semibold text-white">{room.occupied} / {room.capacity}</p>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className={`h-3 rounded-full ${
+                      room.status === 'Available'
+                        ? 'bg-emerald-500'
+                        : room.status === 'Occupied'
+                        ? 'bg-rose-500'
+                        : 'bg-amber-400'
+                    }`}
+                    style={{ width: `${(room.occupied / room.capacity) * 100}%` }}
+                  />
+                </div>
               </div>
-              <div className="h-3 overflow-hidden rounded-full bg-slate-800">
-                <div
-                  className={`h-3 rounded-full ${
-                    room.status === 'Available'
-                      ? 'bg-emerald-500'
-                      : room.status === 'Occupied'
-                      ? 'bg-rose-500'
-                      : 'bg-amber-400'
-                  }`}
-                  style={{ width: `${(room.occupied / room.capacity) * 100}%` }}
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
-                <p className="text-xs text-slate-500">Monthly Rate</p>
-                <p className="mt-1 text-lg font-semibold text-emerald-400">${room.price}</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
-                <p className="text-xs text-slate-500">Capacity</p>
-                <p className="mt-1 text-lg font-semibold text-sky-400">{room.capacity} guests</p>
-              </div>
-            </div>
+              {room.occupants && room.occupants.length > 0 && (
+                <div className="mb-6">
+                  <p className="text-xs uppercase tracking-[0.28em] text-slate-500 mb-2">Residents</p>
+                  <div className="flex flex-wrap gap-2">
+                    {room.occupants.map((b) => {
+                      const paymentsFor = payments.filter((p) => p.boarderId === b.id)
+                      const { totalDue } = getBoarderTotals(b, paymentsFor, room)
+                      const derived = getDerivedBoarderStatus(b, totalDue)
+                      return (
+                        <span key={b.id} className="inline-flex items-center gap-2 rounded-full bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-300">
+                          <span className="font-semibold">{b.name.split(' ')[0]}</span>
+                          <span className="rounded-full bg-slate-700 px-2 py-0.5 text-[10px]">{derived}</span>
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
-            <div className="mb-6">
-              <p className="text-xs uppercase tracking-[0.28em] text-slate-500 mb-2">Amenities</p>
-              <div className="flex flex-wrap gap-2">
-                {room.amenities.map((amenity) => (
-                  <span key={amenity} className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-300">
-                    {amenity}
-                  </span>
-                ))}
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+                  <p className="text-xs text-slate-500">Monthly Rate</p>
+                  <p className="mt-1 text-lg font-semibold text-emerald-400">৳{room.price}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-800/50 bg-slate-950/50 px-4 py-3">
+                  <p className="text-xs text-slate-500">Capacity</p>
+                  <p className="mt-1 text-lg font-semibold text-sky-400">{room.capacity} guests</p>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-500 mb-2">Amenities</p>
+                <div className="flex flex-wrap gap-2">
+                  {room.amenities.map((amenity) => (
+                    <span key={amenity} className="inline-flex items-center rounded-full bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-300">
+                      {amenity}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 border-t border-slate-800/50 pt-6">
+                <button onClick={() => setViewing(room.id)} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
+                  <Eye className="h-4 w-4" />
+                </button>
+                <button onClick={() => setEditing(room.id)} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
+                  <Edit2 className="h-4 w-4" />
+                </button>
+                <button onClick={() => {
+                  const roomBoarders = boarders.filter((b) => b.room === room.id || b.room === room.roomNumber)
+                  if (roomBoarders.length > 0) {
+                    setRoomDeleteTarget(room)
+                  } else {
+                    setConfirmDelete(room.id)
+                  }
+                }} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center gap-2 border-t border-slate-800/50 pt-6">
-              <button onClick={() => setViewing(room.id)} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-sky-400">
-                <Eye className="h-4 w-4" />
-              </button>
-              <button onClick={() => setEditing(room.id)} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400">
-                <Edit2 className="h-4 w-4" />
-              </button>
-              <button onClick={() => {
-                const count = boarders.filter((b) => b.room === room.id || b.room === room.roomNumber).length
-                if (count > 0) {
-                  setDeleteWarning(`Cannot delete ${room.name}. It has ${count} boarder(s) assigned. Remove them first.`)
-                } else {
-                  setConfirmDelete(room.id)
-                }
-              }} className="flex-1 inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </section>
 
       <Modal open={openAdd} onClose={() => setOpenAdd(false)}>
@@ -251,15 +319,70 @@ export default function RoomsPage() {
               <p><strong>Capacity:</strong> {room.capacity}</p>
               <p><strong>Occupied beds:</strong> {room.occupied}</p>
               <p><strong>Available beds:</strong> {room.available}</p>
-              <p><strong>Monthly rent:</strong> ${room.price}</p>
+              <p><strong>Monthly rent:</strong> ৳{room.price}</p>
               <p><strong>Status:</strong> {room.occupancyStatus}</p>
             </div>
           ) : null
         })()}
       </Modal>
 
+      <Modal open={!!roomDeleteTarget} onClose={() => setRoomDeleteTarget(null)}>
+        <h3 className="text-lg font-semibold text-white">Room delete options</h3>
+        {roomDeleteTarget && (
+          <div className="mt-4 space-y-4 text-sm text-slate-200">
+            <p>
+              {roomDeleteTarget.name} has {boarders.filter((b) => b.room === roomDeleteTarget.id || b.room === roomDeleteTarget.roomNumber).length} assigned boarder(s).
+              You must move or checkout those boarders before deleting the room.
+            </p>
+            <div className="grid gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  boarders
+                    .filter((b) => b.room === roomDeleteTarget.id || b.room === roomDeleteTarget.roomNumber)
+                    .forEach((boarder) => {
+                      const checkOutDate = boarder.checkOut || getTodayDate()
+                      updateBoarder(boarder.id, { status: 'CHECKED_OUT', checkOut: checkOutDate })
+                    })
+                  removeRoom(roomDeleteTarget.id)
+                  setRoomDeleteTarget(null)
+                }}
+                className="rounded-2xl bg-amber-500 px-4 py-3 text-left text-sm font-semibold text-slate-950 transition hover:bg-amber-400"
+              >
+                Check out all boarders and delete room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  boarders
+                    .filter((b) => b.room === roomDeleteTarget.id || b.room === roomDeleteTarget.roomNumber)
+                    .forEach((boarder) => {
+                      const checkOutDate = boarder.checkOut || getTodayDate()
+                      updateBoarder(boarder.id, { status: 'CLOSED', checkOut: checkOutDate })
+                    })
+                  removeRoom(roomDeleteTarget.id)
+                  setRoomDeleteTarget(null)
+                }}
+                className="rounded-2xl bg-rose-500 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-rose-400"
+              >
+                Archive all boarders and delete room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRoomDeleteTarget(null)
+                  navigate('/boarders', { state: { section: 'active' } })
+                }}
+                className="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+              >
+                Move boarders manually in Boarders
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <ConfirmModal open={!!confirmDelete} title="Delete room" message={confirmDelete || ''} onConfirm={() => { if (confirmDelete) { removeRoom(confirmDelete); setConfirmDelete(null) } }} onCancel={() => setConfirmDelete(null)} />
-      <ConfirmModal open={!!deleteWarning} title="Cannot delete room" message="This room contains active boarders and cannot be deleted." onConfirm={() => { setDeleteWarning(null) }} onCancel={() => setDeleteWarning(null)} />
 
       {/* Room statistics */}
       <section className="grid gap-6 xl:grid-cols-3">
@@ -303,11 +426,11 @@ export default function RoomsPage() {
 
         <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/90 p-6 shadow-lg shadow-slate-950/20">
           <h3 className="text-lg font-semibold text-white mb-4">Monthly Revenue</h3>
-          <p className="text-4xl font-bold text-emerald-400">${monthlyRevenue.toLocaleString()}</p>
+          <p className="text-4xl font-bold text-emerald-400">৳{monthlyRevenue.toLocaleString()}</p>
           <p className="mt-2 text-sm text-slate-400">From {occupiedCount} occupied rooms</p>
           <div className="mt-4 pt-4 border-t border-slate-800/50">
             <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Average per occupied room</p>
-            <p className="mt-2 text-2xl font-semibold text-sky-400">${averageRevenuePerRoom.toFixed(0)}</p>
+            <p className="mt-2 text-2xl font-semibold text-sky-400">৳{averageRevenuePerRoom.toFixed(0)}</p>
           </div>
         </div>
       </section>

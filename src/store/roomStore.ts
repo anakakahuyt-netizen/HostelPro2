@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import type { Room } from '../types'
 import * as databaseAdapter from '../services/database/databaseAdapter'
+import * as storageService from '../services/storageService'
 import { showToast } from '../services/toast'
+import { logActivity } from '../services/activityLog'
 
 // This store now uses databaseAdapter, which currently forwards to the API layer.
 // Future migration will replace the adapter implementation with SQLite/Electron.
@@ -13,7 +15,16 @@ interface RoomState {
 }
 
 export const useRoomStore = create<RoomState>((set, get) => {
-  const rooms = databaseAdapter.getRooms()
+  // Migration: check localStorage first, then SQLite
+  let rooms = databaseAdapter.getRooms()
+  if (rooms.length === 0) {
+    // If SQLite is empty, try to load from localStorage (migration path)
+    const storageRooms = storageService.getRooms()
+    if (storageRooms && storageRooms.length > 0) {
+      databaseAdapter.saveRooms(storageRooms)
+      rooms = storageRooms
+    }
+  }
   return {
     rooms,
     addRoom: (r) => {
@@ -27,6 +38,11 @@ export const useRoomStore = create<RoomState>((set, get) => {
         databaseAdapter.saveRooms(next)
         return { rooms: next }
       })
+      logActivity({
+        type: 'RoomCreated',
+        message: `Room created: ${r.roomNumber}`,
+        roomId: r.id,
+      })
     },
     updateRoom: (id, patch) => {
       set((s) => {
@@ -34,11 +50,18 @@ export const useRoomStore = create<RoomState>((set, get) => {
         databaseAdapter.saveRooms(next)
         return { rooms: next }
       })
+      showToast('Room updated')
+      logActivity({
+        type: 'RoomUpdated',
+        message: `Room updated: ${id}`,
+        roomId: id,
+      })
     },
     removeRoom: (id) => {
       set((s) => {
-        const next = s.rooms.filter((r) => r.id !== id)
+        const next = s.rooms.filter((r) => r.id !== id && r.roomNumber !== id)
         databaseAdapter.saveRooms(next)
+        showToast('Delete completed')
         return { rooms: next }
       })
     },

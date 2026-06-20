@@ -7,7 +7,8 @@ export function getPreloadPath(baseDir: string): string {
 }
 
 export function getIndexHtmlPath(baseDir: string): string {
-  return path.join(baseDir, '../dist/index.html')
+  // baseDir is dist-electron/electron, go up 2 levels to root, then to dist
+  return path.join(baseDir, '../../dist/index.html')
 }
 
 // Later, when SQLite is enabled, the database file can be stored under

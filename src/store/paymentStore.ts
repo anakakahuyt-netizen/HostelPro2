@@ -1,7 +1,56 @@
 import { create } from 'zustand'
-import type { Payment } from '../types'
+import type { Boarder, Payment, Room, PaymentStatus } from '../types'
+import { useBoarderStore } from './boarderStore'
+import { useRoomStore } from './roomStore'
 import * as databaseAdapter from '../services/database/databaseAdapter'
+import * as storageService from '../services/storageService'
 import { showToast } from '../services/toast'
+import { normalizeBoarderStatus, getDerivedBoarderStatus } from '../utils/boarderLedger'
+import { logActivity } from '../services/activityLog'
+
+function getRoomPrice(payment: Payment, rooms: Room[], boarders: Boarder[]) {
+  const room = rooms.find((r) => r.id === payment.room || r.roomNumber === payment.room)
+  if (room?.price != null) return room.price
+  const boarder = boarders.find((b) => b.id === payment.boarderId)
+  const boarderRoom = rooms.find((r) => r.id === boarder?.room || r.roomNumber === boarder?.room)
+  return boarderRoom?.price || 0
+}
+
+export function computePaymentStatus(payment: Payment, rooms: Room[], boarders: Boarder[]): PaymentStatus {
+  const amount = Number(payment.amount || 0)
+  const rent = getRoomPrice(payment, rooms, boarders)
+  const boarder = boarders.find((b) => b.id === payment.boarderId)
+
+  if (!boarder) {
+    if (amount === 0) return 'Due'
+    if (amount > rent) return 'Advance'
+    if (amount === rent) return 'Paid'
+    if (amount > 0) return 'Partial'
+    return 'Due'
+  }
+
+  const normalizedStatus = normalizeBoarderStatus(boarder.status)
+  const derivedStatus = normalizedStatus === 'CHECKED_OUT'
+    ? 'CHECKED_OUT'
+    : getDerivedBoarderStatus(boarder, 0)
+
+  if (amount === 0) return 'Due'
+  if (derivedStatus === 'BOOKED') return 'Advance'
+  if (amount > rent) return 'Advance'
+  if (amount === rent) return 'Paid'
+  if (derivedStatus === 'ACTIVE') return 'Partial'
+  return 'Due'
+}
+
+function normalizePayment(payment: Payment): Payment {
+  const rooms = useRoomStore.getState().rooms
+  const boarders = useBoarderStore.getState().boarders
+  return { ...payment, status: computePaymentStatus(payment, rooms, boarders) }
+}
+
+function normalizePayments(payments: Payment[]): Payment[] {
+  return payments.map((payment) => normalizePayment(payment))
+}
 
 // This store uses databaseAdapter, allowing the persistence layer to be swapped later.
 interface PaymentState {
@@ -13,7 +62,17 @@ interface PaymentState {
 }
 
 export const usePaymentStore = create<PaymentState>((set, get) => {
-  const payments = databaseAdapter.getPayments()
+  // Migration: check localStorage first, then SQLite
+  let payments = normalizePayments(databaseAdapter.getPayments())
+  if (payments.length === 0) {
+    // If SQLite is empty, try to load from localStorage (migration path)
+    const storagePayments = storageService.getPayments()
+    if (storagePayments && storagePayments.length > 0) {
+      const normalizedPayments = normalizePayments(storagePayments)
+      databaseAdapter.savePayments(normalizedPayments)
+      payments = normalizedPayments
+    }
+  }
   return {
     payments,
     addPayment: (p) => {
@@ -22,9 +81,16 @@ export const usePaymentStore = create<PaymentState>((set, get) => {
         return
       }
       set((s) => {
-        const next = [p, ...s.payments]
+        const payment = normalizePayment(p)
+        const next = [payment, ...s.payments]
         databaseAdapter.savePayments(next)
         return { payments: next }
+      })
+      showToast('Payment saved')
+      logActivity({
+        type: 'PaymentReceived',
+        message: `Payment received: ${p.amount} for ${p.guest}`,
+        paymentId: p.id,
       })
     },
     updatePayment: (id, patch) => {
@@ -33,14 +99,20 @@ export const usePaymentStore = create<PaymentState>((set, get) => {
         return
       }
       set((s) => {
-        const next = s.payments.map((payment) => (payment.id === id ? { ...payment, ...patch } : payment))
+        const next = s.payments.map((payment) => {
+          if (payment.id !== id) return payment
+          const updated = { ...payment, ...patch }
+          return normalizePayment(updated)
+        })
         databaseAdapter.savePayments(next)
         return { payments: next }
       })
+      showToast('Payment saved')
     },
     removePayment: (id) => set((s) => {
       const next = s.payments.filter((x) => x.id !== id)
       databaseAdapter.savePayments(next)
+      showToast('Delete completed')
       return { payments: next }
     }),
     getPaymentsByBoarder: (boarderId) => get().payments.filter((p) => p.boarderId === boarderId),

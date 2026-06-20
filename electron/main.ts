@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import { existsSync } from 'fs'
 import { dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { registerBoarderHandlers } from './ipc/boarderHandlers.js'
@@ -63,6 +64,8 @@ function createWindow() {
       console.error('loadURL threw', err)
     }
   } else {
+    console.log('Resolved production index.html path:', loadTarget.file)
+    console.log('Production index.html exists:', existsSync(loadTarget.file))
     console.log('Loading file:', loadTarget.file)
     try {
       mainWindow.loadFile(loadTarget.file)

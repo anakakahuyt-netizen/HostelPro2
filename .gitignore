@@ -2,8 +2,14 @@
 node_modules/
 
 # Build output
+build/
 dist/
 dist-electron/
+
+# Installer and release artifacts
+*.exe
+*.blockmap
+latest.yml
 
 # Logs
 *.log
