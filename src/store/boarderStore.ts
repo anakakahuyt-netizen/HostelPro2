@@ -5,6 +5,7 @@ import * as databaseAdapter from '../services/database/databaseAdapter'
 import * as storageService from '../services/storageService'
 import { showToast } from '../services/toast'
 import { normalizeBoarderStatus } from '../utils/boarderLedger'
+import { logActivity } from '../services/activityLog'
 
 // This store uses databaseAdapter today, which delegates to the current API layer.
 // Later the databaseAdapter can be switched to use Electron IPC and SQLite.
@@ -58,6 +59,18 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
         databaseAdapter.saveBoarders(next)
         return { boarders: next }
       })
+      logActivity({
+        type: 'BoarderAdded',
+        message: `Boarder added: ${boarder.name}`,
+        boarderId: boarder.id,
+      })
+      if (normalizeBoarderStatus(boarder.status) === 'BOOKED') {
+        logActivity({
+          type: 'BookingCreated',
+          message: `Booking created for ${boarder.name}`,
+          boarderId: boarder.id,
+        })
+      }
       if (room && active) roomsApi.updateRoom(room.id, { occupied: Math.min(room.capacity, room.occupied + 1) })
     },
     updateBoarder: (id, patch) => {
@@ -111,6 +124,38 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
           }
         }
       }
+      if (prev) {
+        const roomChanged = patch.room && prev.room !== patch.room
+        const statusChanged = patch.status && prev.status !== patch.status
+        if (roomChanged) {
+          logActivity({
+            type: 'RoomChanged',
+            message: `Room changed for ${prev.name}: ${prev.room} → ${(patch.room as string)}`,
+            boarderId: id,
+          })
+        }
+        if (statusChanged && normalizeBoarderStatus((patch.status as string) || '') === 'CHECKED_OUT') {
+          logActivity({
+            type: 'BoarderCheckedOut',
+            message: `Boarder checked out: ${prev.name}`,
+            boarderId: id,
+          })
+        }
+        if (statusChanged && normalizeBoarderStatus((patch.status as string) || '') === 'CLOSED') {
+          logActivity({
+            type: 'BoarderArchived',
+            message: `Boarder archived: ${prev.name}`,
+            boarderId: id,
+          })
+        }
+        if (statusChanged && normalizeBoarderStatus((patch.status as string) || '') === 'ACTIVE' && normalizeBoarderStatus(prev.status) === 'CLOSED') {
+          logActivity({
+            type: 'BoarderRestored',
+            message: `Boarder restored: ${prev.name}`,
+            boarderId: id,
+          })
+        }
+      }
     },
     removeBoarder: (id) => {
       const boarder = get().boarders.find((b) => b.id === id)
@@ -155,6 +200,13 @@ export const useBoarderStore = create<BoarderState>((set, get) => {
         if (wasActive && !willBeActive) {
           roomsApi.updateRoom(room.id, { occupied: Math.max(0, room.occupied - 1) })
         }
+      }
+      if (!wasActive && willBeActive) {
+        logActivity({
+          type: 'BoarderRestored',
+          message: `Boarder restored: ${boarder.name}`,
+          boarderId: id,
+        })
       }
     },
   }

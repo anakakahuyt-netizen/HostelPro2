@@ -6,6 +6,7 @@ import * as databaseAdapter from '../services/database/databaseAdapter'
 import * as storageService from '../services/storageService'
 import { showToast } from '../services/toast'
 import { normalizeBoarderStatus, getDerivedBoarderStatus } from '../utils/boarderLedger'
+import { logActivity } from '../services/activityLog'
 
 function getRoomPrice(payment: Payment, rooms: Room[], boarders: Boarder[]) {
   const room = rooms.find((r) => r.id === payment.room || r.roomNumber === payment.room)
@@ -85,6 +86,11 @@ export const usePaymentStore = create<PaymentState>((set, get) => {
         const next = [payment, ...s.payments]
         databaseAdapter.savePayments(next)
         return { payments: next }
+      })
+      logActivity({
+        type: 'PaymentReceived',
+        message: `Payment received: ${p.amount} for ${p.guest}`,
+        paymentId: p.id,
       })
     },
     updatePayment: (id, patch) => {

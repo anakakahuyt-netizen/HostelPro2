@@ -5,7 +5,7 @@
  * Allowed changes: non-functional comments, type declarations, and harmless documentation only.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BarChart3, CreditCard, Home, Users, Layers2, ArrowUpRight, Wallet, CalendarDays } from 'lucide-react'
 import { useBoarderStore } from '../store/boarderStore'
 import { useRoomStore } from '../store/roomStore'
@@ -13,6 +13,8 @@ import { usePaymentStore } from '../store/paymentStore'
 import { useNavigate } from 'react-router-dom'
 import { getRoomOccupants } from '../utils/boarderLedger'
 import { calculateDashboardKpis } from '../utils/dashboardKpi'
+import type { ActivityLogEntry } from '../services/activityLog'
+import { getActivityLogs, subscribeToActivityLogUpdates } from '../services/activityLog'
 
 const iconMap = {
   Users,
@@ -38,6 +40,14 @@ const DashboardPage = () => {
   const kpis = useMemo(() => calculateDashboardKpis(boarders, rooms, payments), [boarders, rooms, payments])
 
   const currentMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
+  const [recentActivities, setRecentActivities] = useState<ActivityLogEntry[]>(() => getActivityLogs().slice(0, 5))
+
+  useEffect(() => {
+    const updateRecentActivities = () => setRecentActivities(getActivityLogs().slice(0, 5))
+    const unsubscribe = subscribeToActivityLogUpdates(updateRecentActivities)
+    updateRecentActivities()
+    return unsubscribe
+  }, [])
 
   // Dashboard room cards - use getRoomOccupants for occupancy display
   const dashboardRoomsWithOccupancy = useMemo(() => rooms.map((room) => {
@@ -196,6 +206,35 @@ const DashboardPage = () => {
                   <div className="text-right">
                     <p className="text-sm text-slate-500">{b.checkIn || '-'}</p>
                     <p className="text-xs text-slate-400">{b.status}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="rounded-[28px] border border-slate-800/80 bg-slate-900/90 p-5 shadow-sm shadow-slate-950/20">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-400">Activity log</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">Recent events</h3>
+            </div>
+          </div>
+          <div className="mt-6 space-y-3">
+            {recentActivities.length === 0 ? (
+              <div className="rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-6 text-center text-slate-400">
+                No activity has been recorded yet.
+              </div>
+            ) : (
+              recentActivities.map((activity) => (
+                <div key={activity.id} className="rounded-3xl border border-slate-800/80 bg-slate-950/90 px-4 py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-semibold text-slate-100">{activity.type.replace(/([A-Z])/g, ' $1').trim()}</p>
+                      <p className="text-sm text-slate-500">{activity.message}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-slate-500">{new Date(activity.timestamp).toLocaleString()}</p>
+                    </div>
                   </div>
                 </div>
               ))

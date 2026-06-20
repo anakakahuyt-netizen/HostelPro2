@@ -3,6 +3,7 @@ import type { Room } from '../types'
 import * as databaseAdapter from '../services/database/databaseAdapter'
 import * as storageService from '../services/storageService'
 import { showToast } from '../services/toast'
+import { logActivity } from '../services/activityLog'
 
 // This store now uses databaseAdapter, which currently forwards to the API layer.
 // Future migration will replace the adapter implementation with SQLite/Electron.
@@ -38,12 +39,22 @@ export const useRoomStore = create<RoomState>((set, get) => {
         databaseAdapter.saveRooms(next)
         return { rooms: next }
       })
+      logActivity({
+        type: 'RoomCreated',
+        message: `Room created: ${r.roomNumber}`,
+        roomId: r.id,
+      })
     },
     updateRoom: (id, patch) => {
       set((s) => {
         const next = s.rooms.map((r) => (r.id === id ? { ...r, ...patch } : r))
         databaseAdapter.saveRooms(next)
         return { rooms: next }
+      })
+      logActivity({
+        type: 'RoomUpdated',
+        message: `Room updated: ${id}`,
+        roomId: id,
       })
     },
     removeRoom: (id) => {
